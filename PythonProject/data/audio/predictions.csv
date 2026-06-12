@@ -1,0 +1,12 @@
+input,start_time,end_time,species_name,confidence
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:00.00","00:00:03.00","Geokichla citrina_Orange-headed Thrush",0.274270
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:00.00","00:00:03.00","Sylvia atricapilla_Eurasian Blackcap",0.250087
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:03.00","00:00:06.00","Alauda arvensis_Eurasian Skylark",0.267147
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:06.00","00:00:09.00","Zosterops japonicus_Warbling White-eye",0.827037
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:06.00","00:00:09.00","Alauda arvensis_Eurasian Skylark",0.122953
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:09.00","00:00:12.00","Zosterops japonicus_Warbling White-eye",0.970922
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:12.00","00:00:15.00","Streptopelia chinensis_Spotted Dove",0.783805
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:12.00","00:00:15.00","Strix aluco_Tawny Owl",0.235521
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:18.00","00:00:21.00","Bambusicola thoracicus_Chinese Bamboo-Partridge",0.117492
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:21.00","00:00:24.00","Calliope calliope_Siberian Rubythroat",0.409029
+"C:\Users\xjtuc\PycharmProjects\PythonProject\soundscape.wav","00:00:24.00","00:00:26.06","Luscinia svecica_Bluethroat",0.230801

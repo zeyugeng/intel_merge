@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+PythonProject/output/
+PythonProject/models/*.pt
+PythonProject/data/audio/*.wav
+PythonProject/data/audio/*.m4a
+PythonProject/data/audio/*.m4s
+PythonProject/docs/*.pptx
+PythonProject/docs/*.ppt
+
+# ODAS build & runtime artifacts
+odas/build/
+odas/*.wav
+odas/odas_output.json
+odas/separated.raw
+odas/postfiltered.raw
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+*.pem
