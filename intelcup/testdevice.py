@@ -69,4 +69,4 @@ def testsoundpredic():
     predictor.close()
 
 if __name__ == '__main__':
-    testmic()
+    testcamera()

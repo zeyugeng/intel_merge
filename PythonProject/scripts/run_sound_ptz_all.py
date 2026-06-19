@@ -4,6 +4,7 @@
 import argparse
 import sys
 from pathlib import Path
+from threading import Thread
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
@@ -11,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from core.config import ODASConfig, PTZConfig, PTZTrackConfig, SoundConfig
 from core.ptz_camera import PTZCameraController
+from core.ptz_tracker import MainThreadCameraPreview
 from core.sound_pipeline import SoundPipeline
 
 
@@ -59,26 +61,52 @@ def main() -> None:
     args = parser.parse_args()
 
     odas_config, sound_config, track_config = build_configs(args)
-    pipeline = SoundPipeline(odas_config, quiet_odas=not args.show_odas_log)
+    preview = MainThreadCameraPreview() if track_config.show_preview else None
 
     print("=== 单终端声源跟踪 ===")
+
+    def sound_worker() -> None:
+        pipeline = SoundPipeline(odas_config, quiet_odas=not args.show_odas_log)
+        try:
+            pipeline.start(clean_stale=not args.no_clean, mic_check=args.mic_check)
+            print("等待 ODAS 稳定输出...")
+            if not pipeline.wait_odas_ready(timeout=3.0):
+                return
+
+            ptz = PTZCameraController(PTZConfig())
+            if not ptz.connect():
+                print("云台未连接，摄像头预览和声源坐标继续运行；云台将不会转动。")
+
+            ptz.track_with_sound(
+                sound_config=sound_config,
+                track_config=track_config,
+                preview=preview,
+            )
+        except RuntimeError as exc:
+            print(f"启动失败: {exc}")
+        except KeyboardInterrupt:
+            print("\n已退出")
+        finally:
+            pipeline.stop()
+            if preview is not None:
+                preview.stop()
+
+    worker = Thread(target=sound_worker, daemon=True)
+    worker.start()
+
     try:
-        pipeline.start(clean_stale=not args.no_clean, mic_check=args.mic_check)
-        print("等待 ODAS 稳定输出...")
-        if not pipeline.wait_odas_ready(timeout=3.0):
-            return
-
-        ptz = PTZCameraController(PTZConfig())
-        if not ptz.connect():
-            return
-
-        ptz.track_with_sound(sound_config=sound_config, track_config=track_config)
-    except RuntimeError as exc:
-        print(f"启动失败: {exc}")
+        if preview is not None:
+            preview.run_forever()
+        else:
+            worker.join()
     except KeyboardInterrupt:
         print("\n已退出")
+        if preview is not None:
+            preview.stop()
     finally:
-        pipeline.stop()
+        if preview is not None:
+            preview.stop()
+        worker.join(timeout=3.0)
 
 
 if __name__ == "__main__":

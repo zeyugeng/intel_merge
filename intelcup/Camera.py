@@ -1,3 +1,27 @@
+import glob
+import os
+
+
+def _ensure_gui_display() -> None:
+    """Cursor/SSH 终端常无 DISPLAY，从 Wayland 会话补齐 XWayland 环境。"""
+    uid = os.getuid()
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+    if os.path.isdir(runtime):
+        os.environ.setdefault("XDG_RUNTIME_DIR", runtime)
+
+    if not os.environ.get("DISPLAY") and os.path.isdir("/tmp/.X11-unix"):
+        os.environ.setdefault("DISPLAY", ":0")
+
+    if not os.environ.get("XAUTHORITY"):
+        candidates = sorted(glob.glob(f"{runtime}/.mutter-Xwaylandauth.*"))
+        if candidates:
+            os.environ["XAUTHORITY"] = candidates[-1]
+
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
+
+
+_ensure_gui_display()
+
 import cv2
 
 #ubuntu版本
@@ -53,13 +77,22 @@ class Camera:
 
         return frame
 
-    def show(self):
+    def show(self, preview_w: int = 1280, preview_h: int = 720):
         if not self.get_camera():
             return
 
-        cv2.namedWindow("Camera", cv2.WINDOW_NORMAL)
+        window = "Camera 实时预览 (按 q 退出)"
+        cv2.namedWindow(window, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window, preview_w, preview_h)
+        try:
+            cv2.setWindowProperty(window, cv2.WND_PROP_TOPMOST, 1)
+        except cv2.error:
+            pass
 
-        preview_w, preview_h = 1280, 720
+        real_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        real_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(f"实时预览已启动: {real_w}x{real_h} -> 窗口 {preview_w}x{preview_h}")
+        print("若看不到窗口，请 Alt+Tab 切换到「Camera 实时预览」")
 
         while True:
             ret, frame = self.cap.read()
@@ -74,15 +107,21 @@ class Camera:
             frame_show = cv2.resize(
                 frame,
                 (int(w * scale), int(h * scale)),
-                interpolation=cv2.INTER_AREA
+                interpolation=cv2.INTER_AREA,
             )
 
-            cv2.imshow("Camera", frame_show)
+            cv2.imshow(window, frame_show)
 
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord("q"):
                 break
+            if key == ord("f"):
+                try:
+                    top = cv2.getWindowProperty(window, cv2.WND_PROP_TOPMOST)
+                    cv2.setWindowProperty(window, cv2.WND_PROP_TOPMOST, 0 if top else 1)
+                except cv2.error:
+                    pass
 
         self.release()
 
@@ -96,17 +135,25 @@ class Camera:
 
 
 if __name__ == "__main__":
-    camera = Camera(camera_id=0)
-    camera.get_frame()
-    # 打印实际生效的分辨率
-    real_w = camera.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    real_h = camera.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-    real_fps = camera.cap.get(cv2.CAP_PROP_FPS)
-    print(f"实际分辨率: {int(real_w)} x {int(real_h)}")
-    print(f"实际FPS: {real_fps}")
+    import argparse
 
-    frame = camera.get_frame()
-    if frame is not None:
-        print("图像shape(高,宽,通道)：", frame.shape)
+    parser = argparse.ArgumentParser(description="USB 摄像头实时预览")
+    parser.add_argument("--id", type=int, default=0, help="摄像头编号，默认 0")
+    parser.add_argument("--width", type=int, default=1920, help="采集宽度，默认 1920")
+    parser.add_argument("--height", type=int, default=1080, help="采集高度，默认 1080")
+    args = parser.parse_args()
+
+    camera = Camera(camera_id=args.id)
+    camera.WIDTH = args.width
+    camera.HEIGHT = args.height
+
+    if not camera.get_camera():
+        raise SystemExit(1)
+
+    real_w = int(camera.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    real_h = int(camera.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    real_fps = camera.cap.get(cv2.CAP_PROP_FPS)
+    print(f"实际分辨率: {real_w} x {real_h}")
+    print(f"实际FPS: {real_fps}")
 
     camera.show()

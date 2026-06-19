@@ -7,7 +7,7 @@ from onvif import ONVIFCamera
 
 from .config import PTZConfig, PTZTrackConfig, SoundConfig
 from .paths import CAPTURES_DIR, OUTPUT_DIR
-from .ptz_tracker import SoundPTZTracker
+from .ptz_tracker import CameraPreviewThread, SoundPTZTracker
 from .sound_client import SoundSourceClient
 
 
@@ -21,6 +21,7 @@ class PTZCameraController:
         self.media_service = None
         self.profile_token = None
         self.stream_uri: Optional[str] = None
+        self.connected = False
 
     def connect(self) -> bool:
         try:
@@ -34,13 +35,17 @@ class PTZCameraController:
             profiles = self.media_service.GetProfiles()
             self.profile_token = profiles[0].token
             self.ptz_service = self.camera.create_ptz_service()
+            self.connected = True
             print(f"成功连接云台 {self.config.ip}")
             return True
         except Exception as exc:
+            self.connected = False
             print(f"连接云台失败: {exc}")
             return False
 
     def move_ptz(self, pan_speed: float = 0.0, tilt_speed: float = 0.0, zoom_speed: float = 0.0) -> None:
+        if not self.connected or self.ptz_service is None:
+            return
         try:
             request = self.ptz_service.create_type("ContinuousMove")
             request.ProfileToken = self.profile_token
@@ -53,6 +58,8 @@ class PTZCameraController:
             print(f"云台转动失败: {exc}")
 
     def stop_ptz(self, stop_zoom: bool = True) -> None:
+        if not self.connected or self.ptz_service is None:
+            return
         try:
             request = self.ptz_service.create_type("Stop")
             request.ProfileToken = self.profile_token
@@ -63,6 +70,8 @@ class PTZCameraController:
             print(f"停止云台失败: {exc}")
 
     def get_stream_uri(self) -> Optional[str]:
+        if not self.connected or self.media_service is None:
+            return None
         stream_params = {
             "ProfileToken": self.profile_token,
             "StreamSetup": {
@@ -141,6 +150,7 @@ class PTZCameraController:
         self,
         sound_config: Optional[SoundConfig] = None,
         track_config: Optional[PTZTrackConfig] = None,
+        preview: Optional[CameraPreviewThread] = None,
     ) -> None:
         """根据实时声源坐标驱动云台转动，可选 RTSP 预览。"""
-        SoundPTZTracker(self, sound_config, track_config).run()
+        SoundPTZTracker(self, sound_config, track_config, preview=preview).run()
