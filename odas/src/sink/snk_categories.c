@@ -53,8 +53,8 @@
 
         }
 
-        obj->buffer = (char *) malloc(sizeof(char) * 8192);
-        memset(obj->buffer, 0x00, sizeof(char) * 8192);
+        obj->buffer = (char *) malloc(sizeof(char) * 1024);
+        memset(obj->buffer, 0x00, sizeof(char) * 1024);
         obj->bufferSize = 0;
 
         obj->in = (msg_categories_obj *) NULL;
@@ -336,19 +336,12 @@
     void snk_categories_process_format_text_json(snk_categories_obj * obj) {
 
         unsigned int iChannel;
-        int offset;
-        int written;
 
-        offset = 0;
+        obj->buffer[0] = 0x00;
 
-        written = snprintf(obj->buffer + offset, 8192 - offset, "{\n");
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    \"timeStamp\": %llu,\n", obj->in->timeStamp);
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    \"src\": [\n");
-        if (written > 0) { offset += written; }
+        sprintf(obj->buffer,"%s{\n",obj->buffer);
+        sprintf(obj->buffer,"%s    \"timeStamp\": %llu,\n",obj->buffer,obj->in->timeStamp);
+        sprintf(obj->buffer,"%s    \"src\": [\n",obj->buffer);
 
         for (iChannel = 0; iChannel < obj->nChannels; iChannel++) {
 
@@ -356,22 +349,19 @@
 
                 case 0x01:
 
-                    written = snprintf(obj->buffer + offset, 8192 - offset, "        { \"category\": \"speech\" }");
-                    if (written > 0) { offset += written; }
+                    sprintf(obj->buffer,"%s        { \"category\": \"speech\" }",obj->buffer);
 
                 break;
 
                 case 0x00:
 
-                    written = snprintf(obj->buffer + offset, 8192 - offset, "        { \"category\": \"nonspeech\" }");
-                    if (written > 0) { offset += written; }
+                    sprintf(obj->buffer,"%s        { \"category\": \"nonspeech\" }",obj->buffer);
 
                 break;
 
                 default:
 
-                    written = snprintf(obj->buffer + offset, 8192 - offset, "        { \"category\": \"undefined\" }");
-                    if (written > 0) { offset += written; }
+                    sprintf(obj->buffer,"%s        { \"category\": \"undefined\" }",obj->buffer);
 
                 break;
 
@@ -379,23 +369,18 @@
 
             if (iChannel != (obj->nChannels - 1)) {
 
-                written = snprintf(obj->buffer + offset, 8192 - offset, ",");
-                if (written > 0) { offset += written; }
+                sprintf(obj->buffer,"%s,",obj->buffer);
 
             }
 
-            written = snprintf(obj->buffer + offset, 8192 - offset, "\n");
-            if (written > 0) { offset += written; }
+            sprintf(obj->buffer,"%s\n",obj->buffer);
 
         }
         
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    ]\n");
-        if (written > 0) { offset += written; }
+        sprintf(obj->buffer,"%s    ]\n",obj->buffer);
+        sprintf(obj->buffer,"%s}\n",obj->buffer);
 
-        written = snprintf(obj->buffer + offset, 8192 - offset, "}\n");
-        if (written > 0) { offset += written; }
-
-        obj->bufferSize = (unsigned int) offset;
+        obj->bufferSize = strlen(obj->buffer);
 
     }
 

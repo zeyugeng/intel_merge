@@ -58,8 +58,8 @@
 
         obj->fp = (FILE *) NULL;
 
-        obj->buffer = (char *) malloc(sizeof(char) * 8192);
-        memset(obj->buffer, 0x00, sizeof(char) * 8192);
+        obj->buffer = (char *) malloc(sizeof(char) * 1024);
+        memset(obj->buffer, 0x00, sizeof(char) * 1024);
         obj->bufferSize = 0;
 
         obj->in = (msg_tracks_obj *) NULL;
@@ -339,55 +339,115 @@
     }
 
     void snk_tracks_process_format_text_json(snk_tracks_obj * obj) {
-
-        unsigned int iTrack;
-        int offset;
-        int written;
-
-        offset = 0;
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "{\n");
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    \"timeStamp\": %llu,\n", obj->in->timeStamp);
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    \"src\": [\n");
-        if (written > 0) { offset += written; }
-
-        for (iTrack = 0; iTrack < obj->nTracks; iTrack++) {
-
-            written = snprintf(obj->buffer + offset, 8192 - offset,
-                    "        { \"id\": %llu, \"tag\": \"%s\", \"x\": %1.3f, \"y\": %1.3f, \"z\": %1.3f, \"activity\": %1.3f }",
-                    obj->in->tracks->ids[iTrack],
-                    obj->in->tracks->tags[iTrack],
-                    obj->in->tracks->array[iTrack*3+0],
-                    obj->in->tracks->array[iTrack*3+1],
-                    obj->in->tracks->array[iTrack*3+2],
-                    obj->in->tracks->activity[iTrack]);
-            if (written > 0) { offset += written; }
-
-            if (iTrack != (obj->nTracks - 1)) {
-
-                written = snprintf(obj->buffer + offset, 8192 - offset, ",");
-                if (written > 0) { offset += written; }
-
-            }
-
-            written = snprintf(obj->buffer + offset, 8192 - offset, "\n");
-            if (written > 0) { offset += written; }
-
-        }
-        
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    ]\n");
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "}\n");
-        if (written > 0) { offset += written; }
-
-        obj->bufferSize = (unsigned int) offset;
-
+    unsigned int bufferTotalSize=1024;
+    // 1. 入参严格校验：避免空指针/非法参数
+    if (obj == NULL || obj->buffer == NULL || bufferTotalSize == 0 || obj->in == NULL || obj->in->tracks == NULL) {
+        obj->bufferSize = 0;  // 异常时清空长度
+        return;
     }
+
+    unsigned int iTrack;
+    unsigned int currentLen = 0;  // 记录当前已使用的缓冲区长度
+    int ret;                      // snprintf返回值：成功返回需写入的字符数（不含'\0'）
+
+    // 2. 初始化缓冲区：确保以'\0'结尾
+    obj->buffer[0] = '\0';
+    obj->bufferSize = 0;
+
+    // 3. 拼接JSON开头 {
+    ret = snprintf(obj->buffer + currentLen,          // 拼接起始位置
+                   bufferTotalSize - currentLen,      // 剩余可用长度（核心：限制写入范围）
+                   "{\n");                            // 要拼接的内容
+    if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+        goto buffer_error;  // 缓冲区不足，触发容错
+    }
+    currentLen += ret;
+
+    // 4. 拼接时间戳字段
+    ret = snprintf(obj->buffer + currentLen,
+                   bufferTotalSize - currentLen,
+                   "    \"timeStamp\": %llu,\n",
+                   obj->in->timeStamp);  // 注意：timeStamp来自in字段
+    if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+        goto buffer_error;
+    }
+    currentLen += ret;
+
+    // 5. 拼接src数组开头
+    ret = snprintf(obj->buffer + currentLen,
+                   bufferTotalSize - currentLen,
+                   "    \"src\": [\n");
+    if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+        goto buffer_error;
+    }
+    currentLen += ret;
+
+    // 6. 循环拼接每条轨迹数据
+    for (iTrack = 0; iTrack < obj->nTracks; iTrack++) {
+        // 拼接单条轨迹的JSON对象
+        ret = snprintf(obj->buffer + currentLen,
+                       bufferTotalSize - currentLen,
+                       "        { \"id\": %llu, \"tag\": \"%s\", \"x\": %.3f, \"y\": %.3f, \"z\": %.3f, \"activity\": %.3f }",
+                       obj->in->tracks->ids[iTrack],
+                       obj->in->tracks->tags[iTrack],
+                       obj->in->tracks->array[iTrack*3+0],
+                       obj->in->tracks->array[iTrack*3+1],
+                       obj->in->tracks->array[iTrack*3+2],
+                       obj->in->tracks->activity[iTrack]);
+        if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+            goto buffer_error;
+        }
+        currentLen += ret;
+
+        // 非最后一条轨迹，添加逗号（JSON格式要求）
+        if (iTrack != (obj->nTracks - 1)) {
+            ret = snprintf(obj->buffer + currentLen,
+                           bufferTotalSize - currentLen,
+                           ",");
+            if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+                goto buffer_error;
+            }
+            currentLen += ret;
+        }
+
+        // 每条轨迹后换行（格式化美观）
+        ret = snprintf(obj->buffer + currentLen,
+                       bufferTotalSize - currentLen,
+                       "\n");
+        if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+            goto buffer_error;
+        }
+        currentLen += ret;
+    }
+
+    // 7. 闭合src数组
+    ret = snprintf(obj->buffer + currentLen,
+                   bufferTotalSize - currentLen,
+                   "    ]\n");
+    if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+        goto buffer_error;
+    }
+    currentLen += ret;
+
+    // 8. 闭合整个JSON对象
+    ret = snprintf(obj->buffer + currentLen,
+                   bufferTotalSize - currentLen,
+                   "}\n");
+    if (ret < 0 || (unsigned int)ret >= bufferTotalSize - currentLen) {
+        goto buffer_error;
+    }
+    currentLen += ret;
+
+    // 9. 最终初始化：确保字符串以'\0'结尾，记录实际长度
+    obj->buffer[currentLen] = '\0';
+    obj->bufferSize = currentLen;
+    return;
+
+// 缓冲区溢出/格式化失败的容错处理
+buffer_error:
+    obj->buffer[0] = '\0';
+    obj->bufferSize = 0;
+}
 
     void snk_tracks_process_format_undefined(snk_tracks_obj * obj) {
 

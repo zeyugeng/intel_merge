@@ -59,7 +59,7 @@ class AudioVisualFusion:
                 has_sound, sound_xyz = self.sound.parse_latest()
                 self.highlight_idx = -1
                 if has_sound and sound_xyz is not None:
-                    sound_x, _, sound_e = sound_xyz
+                    sound_x, _, _, sound_e = sound_xyz
                     self.highlight_idx = self._match_target(sound_x, sound_e, detections)
 
                 self.visual.draw(frame_copy, detections, highlight_idx=self.highlight_idx)

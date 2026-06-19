@@ -1,0 +1,4 @@
+# Offline BirdNET species identification.
+birdnet==0.2.12
+soundfile
+tensorflow

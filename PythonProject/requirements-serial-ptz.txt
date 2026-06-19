@@ -1,0 +1,2 @@
+# Optional serial PWM pan-tilt backend.
+pyserial

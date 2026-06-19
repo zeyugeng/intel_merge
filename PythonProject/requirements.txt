@@ -1,13 +1,14 @@
-# 需要 Python 3.11–3.13（birdnet 0.2.x 要求）
-# 推荐: conda create -n intel_cup python=3.11 -y
+# Full environment for all optional project features.
+#
+# For faster setup use one of the smaller files:
+#   pip install -r requirements-sound-ptz.txt
+#   pip install -r requirements-vision.txt
+#   pip install -r requirements-birdnet.txt
+#   pip install -r requirements-gui.txt
+#   pip install -r requirements-serial-ptz.txt
 
-opencv-python
-ultralytics
-onvif-zeep
-birdnet==0.2.12
-soundfile
-tensorflow
-Pillow
-numpy
-pandas
-scipy
+-r requirements-sound-ptz.txt
+-r requirements-vision.txt
+-r requirements-birdnet.txt
+-r requirements-gui.txt
+-r requirements-serial-ptz.txt

@@ -5,9 +5,9 @@ import cv2
 
 from onvif import ONVIFCamera
 
-from .camera import RTSPCamera
-from .config import CameraConfig, PTZConfig, SoundConfig
+from .config import PTZConfig, PTZTrackConfig, SoundConfig
 from .paths import CAPTURES_DIR, OUTPUT_DIR
+from .ptz_tracker import SoundPTZTracker
 from .sound_client import SoundSourceClient
 
 
@@ -108,7 +108,10 @@ class PTZCameraController:
             while True:
                 valid, sound_xyz = sound.parse_latest()
                 if valid and sound_xyz:
-                    print(f"声源: x={sound_xyz[0]:.2f}, y={sound_xyz[1]:.2f}, E={sound_xyz[2]:.2f}")
+                    print(
+                        f"声源: x={sound_xyz[0]:.2f}, y={sound_xyz[1]:.2f}, "
+                        f"z={sound_xyz[2]:.2f}, E={sound_xyz[3]:.2f}"
+                    )
 
                 ret, frame = cap.read()
                 if not ret:
@@ -133,3 +136,11 @@ class PTZCameraController:
                 writer.release()
             cv2.destroyAllWindows()
             sound.stop()
+
+    def track_with_sound(
+        self,
+        sound_config: Optional[SoundConfig] = None,
+        track_config: Optional[PTZTrackConfig] = None,
+    ) -> None:
+        """根据实时声源坐标驱动云台转动，可选 RTSP 预览。"""
+        SoundPTZTracker(self, sound_config, track_config).run()

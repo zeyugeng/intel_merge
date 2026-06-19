@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
-# 单独测试 ODAS 声源定位（终端 JSON 输出）
+# 单独测试 ODAS 声源定位（自动启动 Python 桥接 + ODAS）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY_ROOT="$(cd "${ROOT}/../PythonProject" && pwd)"
 export LD_LIBRARY_PATH="${ROOT}/build/lib:${LD_LIBRARY_PATH:-}"
-CFG="${1:-${ROOT}/config/myArray.cfg}"
+CFG="${1:-${ROOT}/config/myArray_fusion.cfg}"
 ODAS="${ROOT}/build/bin/odaslive"
+BRIDGE_PID=""
+
+cleanup() {
+    if [[ -n "${BRIDGE_PID}" ]] && kill -0 "${BRIDGE_PID}" 2>/dev/null; then
+        kill "${BRIDGE_PID}" 2>/dev/null || true
+        wait "${BRIDGE_PID}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
 
 echo "=== ODAS 单独测试 ==="
 echo "配置: ${CFG}"
@@ -14,6 +24,11 @@ echo
 
 if [[ ! -x "${ODAS}" ]]; then
     echo "错误: 未找到 ${ODAS}，请先在 odas/build 目录执行 cmake && make"
+    exit 1
+fi
+
+if [[ ! -f "${CFG}" ]]; then
+    echo "错误: 配置文件不存在: ${CFG}"
     exit 1
 fi
 
@@ -42,6 +57,27 @@ else
 fi
 
 echo
-echo "启动 ODAS (Ctrl+C 退出，对着麦克风发声观察 JSON 输出)..."
+echo "清理旧 bridge/ODAS 进程与端口..."
+pkill -f "odas_bridge.py" 2>/dev/null || true
+pkill -f "odaslive" 2>/dev/null || true
+fuser -k 5000/tcp 9001/tcp 2>/dev/null || true
+sleep 1
+
+echo "启动 Python 桥接 (ODAS:9001 → Python:5000)..."
+if [[ -x "${PY_ROOT}/.venv/bin/python" ]]; then
+    PYTHON="${PY_ROOT}/.venv/bin/python"
+else
+    PYTHON="python3"
+fi
+"${PYTHON}" "${PY_ROOT}/scripts/odas_bridge.py" &
+BRIDGE_PID=$!
+sleep 1
+
+if ! kill -0 "${BRIDGE_PID}" 2>/dev/null; then
+    echo "错误: 桥接启动失败，请检查 ${PY_ROOT}/scripts/odas_bridge.py"
+    exit 1
+fi
+
+echo "启动 ODAS (Ctrl+C 退出，对着麦克风发声观察下方声源输出)..."
 echo "---"
-exec "${ODAS}" -c "${CFG}"
+"${ODAS}" -c "${CFG}"

@@ -3,7 +3,9 @@ __pycache__/
 *.py[cod]
 .Python
 .venv/
+.venv-linux/
 venv/
+PythonProject/*.raw
 PythonProject/output/
 PythonProject/models/*.pt
 PythonProject/data/audio/*.wav

@@ -20,7 +20,7 @@ def main():
         while True:
             valid, xyz = client.parse_latest()
             if valid and xyz:
-                print(f"x={xyz[0]:.3f}, y={xyz[1]:.3f}, E={xyz[2]:.3f}")
+                print(f"x={xyz[0]:.3f}, y={xyz[1]:.3f}, z={xyz[2]:.3f}, E={xyz[3]:.3f}")
             time.sleep(0.2)
     except KeyboardInterrupt:
         client.stop()

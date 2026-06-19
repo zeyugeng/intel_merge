@@ -239,36 +239,15 @@ void src_hops_open_interface_soundcard(src_hops_obj * obj) {
         exit(EXIT_FAILURE);
     }
 
-    {
-        snd_pcm_uframes_t period_frames = obj->hopSize;
-        snd_pcm_uframes_t buffer_frames = obj->hopSize * 4;
-
-        if ((err = snd_pcm_hw_params_set_period_size_near(obj->ch, hw_params, &period_frames, 0)) < 0) {
-            printf("Source hops: Cannot set period size: %s\n", snd_strerror(err));
-            exit(EXIT_FAILURE);
-        }
-
-        if ((err = snd_pcm_hw_params_set_buffer_size_near(obj->ch, hw_params, &buffer_frames)) < 0) {
-            printf("Source hops: Cannot set buffer size: %s\n", snd_strerror(err));
-            exit(EXIT_FAILURE);
-        }
-    }
-
     if ((err = snd_pcm_hw_params(obj->ch, hw_params)) < 0) {
-        printf("Source hops: Cannot set hardware parameters: %s\n", snd_strerror(err));
-        if (err == -ENOSPC) {
-            printf("Hint: USB isochronous bandwidth exhausted. Plug the mic array directly into a motherboard USB port (avoid hubs), and move it away from cameras/WiFi dongles on the same bus.\n");
-        }
+        printf("Source hops: Cannot set parameters: %s\n", snd_strerror(err));
         exit(EXIT_FAILURE);
     }
 
     snd_pcm_hw_params_free(hw_params);
 
     if ((err = snd_pcm_prepare(obj->ch)) < 0) {
-        printf("Source hops: Cannot prepare audio interface: %s\n", snd_strerror(err));
-        if (err == -ENOSPC) {
-            printf("Hint: USB isochronous bandwidth exhausted. Plug the mic array directly into a motherboard USB port (avoid hubs), and move it away from cameras/WiFi dongles on the same bus.\n");
-        }
+        printf("Source hops: Cannot prepare audio interface for use: %s\n", snd_strerror(err));
         exit(EXIT_FAILURE);
     }
 

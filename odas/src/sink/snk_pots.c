@@ -56,8 +56,8 @@
 
         obj->fp = (FILE *) NULL;
 
-        obj->buffer = (char *) malloc(sizeof(char) * 8192);
-        memset(obj->buffer, 0x00, sizeof(char) * 8192);
+        obj->buffer = (char *) malloc(sizeof(char) * 1024);
+        memset(obj->buffer, 0x00, sizeof(char) * 1024);
         obj->bufferSize = 0;
 
         obj->in = (msg_pots_obj *) NULL;
@@ -350,49 +350,36 @@
     }
 
     void snk_pots_process_format_text_json(snk_pots_obj * obj) {
-
         unsigned int iPot;
-        int offset;
-        int written;
+        int pos = 0;
 
-        offset = 0;
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "{\n");
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    \"timeStamp\": %llu,\n", obj->in->timeStamp);
-        if (written > 0) { offset += written; }
-
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    \"src\": [\n");
-        if (written > 0) { offset += written; }
+        // 安全写入，不会覆盖 obj->buffer 自身
+        pos += snprintf(obj->buffer + pos, 1024 - pos, "{\n");
+        pos += snprintf(obj->buffer + pos, 1024 - pos, "    \"timeStamp\": %llu,\n", obj->in->timeStamp);
+        pos += snprintf(obj->buffer + pos, 1024 - pos, "    \"src\": [\n");
 
         for (iPot = 0; iPot < obj->nPots; iPot++) {
+            pos += snprintf(obj->buffer + pos, 1024 - pos,
+                            "        { \"x\": %1.3f, \"y\": %1.3f, \"z\": %1.3f, \"E\": %1.3f }",
+                            obj->in->pots->array[iPot * 4 + 0],
+                            obj->in->pots->array[iPot * 4 + 1],
+                            obj->in->pots->array[iPot * 4 + 2],
+                            obj->in->pots->array[iPot * 4 + 3]);
 
-            written = snprintf(obj->buffer + offset, 8192 - offset,
-                    "        { \"x\": %1.3f, \"y\": %1.3f, \"z\": %1.3f, \"E\": %1.3f }",
-                    obj->in->pots->array[iPot*4+0], obj->in->pots->array[iPot*4+1],
-                    obj->in->pots->array[iPot*4+2], obj->in->pots->array[iPot*4+3]);
-            if (written > 0) { offset += written; }
-
-            if (iPot != (obj->nPots - 1)) {
-
-                written = snprintf(obj->buffer + offset, 8192 - offset, ",");
-                if (written > 0) { offset += written; }
-
+            if (iPot != obj->nPots - 1) {
+                pos += snprintf(obj->buffer + pos, 1024 - pos, ",");
             }
 
-            written = snprintf(obj->buffer + offset, 8192 - offset, "\n");
-            if (written > 0) { offset += written; }
+            pos += snprintf(obj->buffer + pos, 1024 - pos, "\n");
 
+            // 打印当前状态
+            // printf("ipot = %d, buffer so far:\n%s\n", iPot, obj->buffer);
         }
-        
-        written = snprintf(obj->buffer + offset, 8192 - offset, "    ]\n");
-        if (written > 0) { offset += written; }
 
-        written = snprintf(obj->buffer + offset, 8192 - offset, "}\n");
-        if (written > 0) { offset += written; }
+        pos += snprintf(obj->buffer + pos, 1024 - pos, "    ]\n");
+        pos += snprintf(obj->buffer + pos, 1024 - pos, "}\n");
 
-        obj->bufferSize = (unsigned int) offset;
+        obj->bufferSize = 1024;
 
     }
 

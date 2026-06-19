@@ -1,0 +1,3 @@
+# Runtime needed for ODAS sound coordinates driving a PTZ camera.
+opencv-python
+onvif-zeep

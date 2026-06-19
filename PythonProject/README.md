@@ -139,24 +139,17 @@ cd intel-cup
 
 ### 2. 创建环境
 
-**Conda（推荐）：**
-
-```bash
-conda env create -f environment.yml
-conda activate intel_cup
-```
-
-**或 pip：**
+**pip/venv（推荐用于当前硬件验证）：**
 
 ```bash
 python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# Linux / macOS
 source .venv/bin/activate
 
-pip install -r requirements.txt
+# 声源坐标驱动云台的最小依赖
+pip install -r requirements-sound-ptz.txt
 ```
+
+完整功能可安装 `requirements.txt`；单独功能可安装 `requirements-vision.txt`、`requirements-birdnet.txt`、`requirements-gui.txt` 或 `requirements-serial-ptz.txt`。
 
 ### 3. 准备模型与数据
 
@@ -176,6 +169,7 @@ pip install -r requirements.txt
 - `CameraConfig`：摄像头 IP、账号、分辨率
 - `SoundConfig`：ODAS 服务器地址与端口
 - `PTZConfig`：云台摄像头地址
+- `PTZTrackConfig`：声源坐标驱动云台的增益、死区与预览开关
 - `VisualConfig`：检测置信度、设备（`cpu` / `cuda`）
 
 ---
@@ -185,7 +179,14 @@ pip install -r requirements.txt
 所有脚本均从**项目根目录**执行：
 
 ```bash
-# 声视融合监测（核心功能）
+# 单终端：ODAS 声源坐标驱动云台跟踪（推荐主入口）
+python scripts/run_sound_ptz_all.py
+python scripts/run_sound_ptz_all.py --no-preview
+
+# 声源跟踪云台（需要 ODAS/bridge 已经运行）
+python scripts/run_ptz_track.py
+
+# 声视融合监测（视觉高亮，镜头不自动跟踪）
 python scripts/run_fusion.py
 
 # 仅视觉鸟类检测
@@ -198,7 +199,7 @@ python scripts/run_birdnet.py data/audio/testau.wav
 # 调试声源 TCP 数据
 python scripts/run_sound_client.py
 
-# 云台 + 声源预览
+# 云台手动转动测试 + 声源预览
 python scripts/run_ptz.py
 
 # GUI 界面原型
@@ -220,15 +221,16 @@ python scripts/run_gui.py
 
 ## 依赖说明
 
-| 包 | 用途 |
+| 文件 | 用途 |
 |----|------|
-| `opencv-python` | 视频采集、显示、图像处理 |
-| `ultralytics` | YOLO26 目标检测 |
-| `onvif-zeep` | 摄像头 ONVIF 协议与 PTZ 控制 |
-| `birdnet` | 鸟类声学物种识别 |
-| `tensorflow` | BirdNET 推理后端 |
-| `soundfile` | 音频读写 |
-| `Pillow` | GUI 图像处理 |
+| `requirements-sound-ptz.txt` | 声源坐标驱动 ONVIF 云台：`opencv-python`, `onvif-zeep` |
+| `requirements-vision.txt` | YOLO 视觉检测与声视融合：`ultralytics` |
+| `requirements-birdnet.txt` | BirdNET 离线鸟声识别：`birdnet`, `tensorflow`, `soundfile` |
+| `requirements-gui.txt` | Tkinter GUI 图片辅助：`Pillow` |
+| `requirements-serial-ptz.txt` | 可选串口 PWM 云台后端：`pyserial` |
+| `requirements.txt` | 全部可选功能合集 |
+
+ODAS 桥接与 `run_sound_client.py` 只使用 Python 标准库；ODAS 本体由 `odas/build/bin/odaslive` 提供。
 
 ---
 
