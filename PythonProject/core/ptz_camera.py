@@ -7,7 +7,7 @@ from onvif import ONVIFCamera
 
 from .config import PTZConfig, PTZTrackConfig, SoundConfig
 from .paths import CAPTURES_DIR, OUTPUT_DIR
-from .ptz_tracker import CameraPreviewThread, SoundPTZTracker
+from .ptz_tracker import CameraPreviewThread, MainThreadCameraPreview, SoundPTZTracker
 from .sound_client import SoundSourceClient
 
 
@@ -150,7 +150,7 @@ class PTZCameraController:
         self,
         sound_config: Optional[SoundConfig] = None,
         track_config: Optional[PTZTrackConfig] = None,
-        preview: Optional[CameraPreviewThread] = None,
+        preview: Optional[CameraPreviewThread | MainThreadCameraPreview] = None,
     ) -> None:
         """根据实时声源坐标驱动云台转动，可选 RTSP 预览。"""
         SoundPTZTracker(self, sound_config, track_config, preview=preview).run()

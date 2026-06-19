@@ -112,6 +112,7 @@ def _show_camera_frame(
             (0, 255, 255),
             2,
         )
+        _draw_sound_target(frame, sx, sy)
 
     h, w = frame.shape[:2]
     scale = min(PREVIEW_W / w, PREVIEW_H / h)
@@ -129,6 +130,19 @@ def _show_camera_frame(
         pass
     cv2.imshow(window_name, frame_show)
     return (cv2.waitKey(1) & 0xFF) != ord("q")
+
+
+def _draw_sound_target(frame, sx: float, sy: float) -> None:
+    height, width = frame.shape[:2]
+    center = (width // 2, height // 2)
+    target = (
+        int(center[0] + max(-1.0, min(1.0, sx)) * width * 0.45),
+        int(center[1] - max(-1.0, min(1.0, sy)) * height * 0.45),
+    )
+
+    cv2.circle(frame, center, 8, (255, 255, 255), 2)
+    cv2.circle(frame, target, 12, (0, 255, 255), 2)
+    cv2.arrowedLine(frame, center, target, (0, 255, 255), 3, tipLength=0.18)
 
 
 class CameraPreviewThread:
@@ -286,6 +300,7 @@ class MainThreadCameraPreview:
                         (0, 255, 255),
                         2,
                     )
+                    _draw_sound_target(frame_show, sx, sy)
 
                 cv2.imshow(window, frame_show)
                 key = cv2.waitKey(1) & 0xFF
@@ -518,8 +533,7 @@ class SoundPTZTracker:
 
                 if preview is not None and not preview.is_running():
                     break
-                if preview is None:
-                    time.sleep(0.05)
+                time.sleep(0.02)
         except KeyboardInterrupt:
             print("\n已停止跟踪")
             raise

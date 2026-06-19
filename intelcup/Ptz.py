@@ -4,7 +4,7 @@ import serial
 
 class PTZ:
     def __init__(self,
-        port="/dev/ttyUSB1",
+        port="/dev/ttyUSB0",
         baud=115200,
         pan_id=1,
         tilt_id=2,

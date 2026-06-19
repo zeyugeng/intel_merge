@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -23,7 +24,8 @@ class SerialPTZConfig:
     tilt_p90_pwm: int = 2150
     pan_invert: bool = False
     tilt_invert: bool = False
-    default_time_ms: int = 1000
+    default_time_ms: int = 120
+    angle_step_per_speed: float = 8.0
 
     @property
     def pan_0_pwm(self) -> float:
@@ -55,13 +57,16 @@ def make_cmd(servo_id: int, pwm: int, move_time_ms: int) -> str:
 
 
 class SerialPanTiltBackend:
-    """Serial-servo backend compatible with absolute angle commands."""
+    """Serial-servo backend compatible with PTZ speed-style tracking."""
 
     def __init__(self, config: SerialPTZConfig | None = None):
         self.config = config or SerialPTZConfig()
         self.ser = None
         self.pan_pwm = int(round(self.config.pan_0_pwm))
         self.tilt_pwm = int(round(self.config.tilt_0_pwm))
+        self.pan_angle = 0.0
+        self.tilt_angle = 0.0
+        self.stream_uri: Optional[str] = None
 
     def connect(self) -> bool:
         try:
@@ -80,15 +85,17 @@ class SerialPanTiltBackend:
             raise RuntimeError("串口云台尚未连接")
 
         move_time = move_time_ms or self.config.default_time_ms
+        self.pan_angle = clamp(pan_angle, -90.0, 90.0)
+        self.tilt_angle = clamp(tilt_angle, -90.0, 90.0)
         pan_pwm = angle_to_pwm(
-            pan_angle,
+            self.pan_angle,
             self.config.pan_n90_pwm,
             self.config.pan_0_pwm,
             self.config.pan_p90_pwm,
             self.config.pan_invert,
         )
         tilt_pwm = angle_to_pwm(
-            tilt_angle,
+            self.tilt_angle,
             self.config.tilt_n90_pwm,
             self.config.tilt_0_pwm,
             self.config.tilt_p90_pwm,
@@ -101,6 +108,25 @@ class SerialPanTiltBackend:
         self.ser.write(cmd.encode("ascii"))
         self.pan_pwm = pan_pwm
         self.tilt_pwm = tilt_pwm
+
+    def move_ptz(
+        self,
+        pan_speed: float = 0.0,
+        tilt_speed: float = 0.0,
+        zoom_speed: float = 0.0,
+    ) -> None:
+        """Approximate continuous PTZ speed by stepping absolute servo angles."""
+        del zoom_speed
+        step = self.config.angle_step_per_speed
+        target_pan = self.pan_angle + pan_speed * step
+        target_tilt = self.tilt_angle + tilt_speed * step
+        self.move_angle(target_pan, target_tilt, self.config.default_time_ms)
+
+    def stop_ptz(self, stop_zoom: bool = True) -> None:
+        del stop_zoom
+
+    def get_stream_uri(self) -> Optional[str]:
+        return None
 
     def center(self) -> None:
         self.move_angle(0, 0)

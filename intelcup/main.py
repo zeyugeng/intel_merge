@@ -37,7 +37,7 @@ def status_1():
         print(f"云台转向: pan={pan_angle:.2f}, tilt={tilt_angle:.2f}")
         ptz.move_angle(pan_angle, tilt_angle)
         break
-
+"""
 def status_2():
     model = YOLO("yolo26n.pt")#加载模型
     # 比例系数，越大云台追踪越激进
@@ -131,15 +131,15 @@ def status_2():
             break
 
     cv2.destroyWindow("tracking")
-
+"""
 
 
 
 
 #初始化
-camera = Camera()
-camera.get_camera()
-print("摄像头就绪")
+#camera = Camera()
+#camera.get_camera()
+#print("摄像头就绪")
 mic = MicrophoneArray(host="0.0.0.0", port=5000)
 mic.connect(wait=True)
 print("麦克风阵列就绪")
