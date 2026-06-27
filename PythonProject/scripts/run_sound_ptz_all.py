@@ -15,13 +15,15 @@ from core.config import (
     PTZConfig,
     PTZTrackConfig,
     SoundConfig,
+    SSSConfig,
     VisualConfig,
     VisualPTZTrackConfig,
 )
 from core.ptz_camera import PTZCameraController
 from core.ptz_tracker import MainThreadCameraPreview, SoundPTZTracker
 from core.serial_ptz import SerialPTZConfig, SerialPanTiltBackend
-from core.sound_pipeline import SoundPipeline, cleanup_stale_services, ports_ready
+from core.sound_pipeline import SoundPipeline, cleanup_stale_services, ensure_ports_free, ports_ready
+from core.sss_birdnet_watcher import SSSBirdnetWatcher
 from core.usb_fusion import USBAudioVisualFusion
 from core.visual_ptz_tracker import VisualPTZTracker
 
@@ -100,6 +102,40 @@ def build_configs(args):
     return odas_config, sound_config, track_config, visual_config, visual_track_config
 
 
+def build_sss_config(args, track_config: PTZTrackConfig | None = None) -> SSSConfig:
+    sss_config = SSSConfig()
+    if args.birdnet_clip_sec is not None:
+        sss_config.clip_seconds = args.birdnet_clip_sec
+    if args.birdnet_cooldown is not None:
+        sss_config.birdnet_cooldown = args.birdnet_cooldown
+    if args.birdnet_conf is not None:
+        sss_config.birdnet_confidence = args.birdnet_conf
+    if args.birdnet_locale is not None:
+        sss_config.birdnet_locale = args.birdnet_locale
+    if args.sss_raw == "postfiltered":
+        sss_config.use_postfiltered = True
+    elif args.sss_raw == "separated":
+        sss_config.use_postfiltered = False
+    if track_config is not None:
+        sss_config.trigger_energy = track_config.activity_threshold
+    elif args.energy is not None:
+        sss_config.trigger_energy = args.energy
+    return sss_config
+
+
+def start_birdnet_watcher_if_requested(
+    args,
+    sound_config: SoundConfig,
+    track_config: PTZTrackConfig | None = None,
+) -> Thread | None:
+    if not args.birdnet_live:
+        return None
+    watcher = SSSBirdnetWatcher(build_sss_config(args, track_config), sound_config)
+    thread = Thread(target=watcher.run_loop, daemon=True)
+    thread.start()
+    return thread
+
+
 def create_ptz_backend(args, track_config: PTZTrackConfig, mode: str):
     if args.ptz_backend == "serial":
         if args.move_time_ms is not None:
@@ -140,15 +176,18 @@ def run_sound_flow(args, odas_config, sound_config, track_config) -> None:
 
     if not args.no_clean:
         print("清理旧进程与占用端口...")
-        cleanup_stale_services(ports, host=host)
-
-    if not ports_ready(host, odas_config.python_port, odas_config.odas_port):
+        if not ensure_ports_free(ports, host=host):
+            print(
+                f"错误: 端口 {odas_config.odas_port}/{odas_config.python_port} 仍被占用，"
+                "声源跟踪无法启动。"
+            )
+            print("常见原因: 另一个终端仍在跑本脚本或 intelcup/main.py")
+            return
+    elif not ports_ready(host, odas_config.python_port, odas_config.odas_port):
         print(
-            f"错误: 端口 {odas_config.odas_port}/{odas_config.python_port} 被占用，"
-            "声源跟踪无法启动。"
+            f"错误: 端口 {odas_config.odas_port}/{odas_config.python_port} 被占用。"
+            "请加 --no-clean 前先手动释放端口，或去掉 --no-clean 自动清理。"
         )
-        print("常见原因: 另一个终端正在跑 intelcup/main.py")
-        print("解决: 在那个终端 Ctrl+C，或执行 pkill -f 'intel_merge/intelcup'")
         return
 
     pipeline = SoundPipeline(odas_config, quiet_odas=not args.show_odas_log)
@@ -160,6 +199,8 @@ def run_sound_flow(args, odas_config, sound_config, track_config) -> None:
         if not pipeline.wait_odas_ready(timeout=5.0):
             print("ODAS 未就绪，请检查麦克风与 ../odas/build")
             return
+
+        birdnet_thread = start_birdnet_watcher_if_requested(args, sound_config, track_config)
 
         ptz = create_ptz_backend(args, track_config, "sound")
         if not ptz.connect():
@@ -207,13 +248,15 @@ def run_visual_flow(args, visual_config, visual_track_config) -> None:
         print("\n已退出")
 
 
-def run_fusion_flow(args, odas_config, sound_config, visual_config) -> None:
+def run_fusion_flow(args, odas_config, sound_config, visual_config, track_config) -> None:
     ports = (odas_config.python_port, odas_config.odas_port)
     host = odas_config.host
     if not args.no_clean:
-        cleanup_stale_services(ports, host=host)
-    if not ports_ready(host, odas_config.python_port, odas_config.odas_port):
-        print("错误: 端口被占用，请先停掉 intelcup/main.py")
+        if not ensure_ports_free(ports, host=host):
+            print("错误: 端口被占用，请先停掉其他 run_sound_ptz_all / main.py")
+            return
+    elif not ports_ready(host, odas_config.python_port, odas_config.odas_port):
+        print("错误: 端口被占用")
         return
 
     pipeline = SoundPipeline(odas_config, quiet_odas=not args.show_odas_log)
@@ -222,6 +265,8 @@ def run_fusion_flow(args, odas_config, sound_config, visual_config) -> None:
         print("等待 ODAS 稳定输出...")
         if not pipeline.wait_odas_ready(timeout=3.0):
             return
+
+        birdnet_thread = start_birdnet_watcher_if_requested(args, sound_config, track_config)
 
         fusion = USBAudioVisualFusion(
             sound_config=sound_config,
@@ -257,8 +302,8 @@ def main() -> None:
         default=None,
         help="sound 模式：absolute=main.py atan2；velocity=连续速度",
     )
-    parser.add_argument("--activity", type=float, default=None, help="sound absolute 阈值，默认 0.001")
-    parser.add_argument("--trigger-interval", type=float, default=None, help="sound absolute 触发间隔秒")
+    parser.add_argument("--activity", type=float, default=None, help="sound absolute 阈值，默认 0.01")
+    parser.add_argument("--trigger-interval", type=float, default=None, help="sound absolute 触发间隔秒，默认 2.0")
     parser.add_argument("--energy", type=float, default=None, help="sound velocity / fusion 能量阈值")
     parser.add_argument("--conf", type=float, default=0.3, help="visual/fusion YOLO 置信度")
     parser.add_argument(
@@ -307,7 +352,7 @@ def main() -> None:
     parser.add_argument("--serial-port", default="/dev/ttyUSB0")
     parser.add_argument("--serial-baud", type=int, default=115200)
     parser.add_argument("--angle-step", type=float, default=8.0)
-    parser.add_argument("--move-time-ms", type=int, default=None, help="云台转动时间 ms")
+    parser.add_argument("--move-time-ms", type=int, default=None, help="云台转动时间 ms，sound absolute 默认 800")
     parser.add_argument("--no-clean", action="store_true")
     parser.add_argument("--mic-check", action="store_true")
     parser.add_argument(
@@ -315,6 +360,31 @@ def main() -> None:
         type=Path,
         default=None,
         help="启动时用 BirdNET 分析指定 wav（对应 main.py SoundPredict）",
+    )
+    parser.add_argument(
+        "--sss-raw",
+        choices=("separated", "postfiltered"),
+        default="separated",
+        help="BirdNET 读取 separated.raw（默认）或 postfiltered.raw",
+    )
+    parser.add_argument(
+        "--birdnet-live",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="sound/fusion：读 ODAS SSS 分离音并实时 BirdNET（默认开启，用 --no-birdnet-live 关闭）",
+    )
+    parser.add_argument("--birdnet-clip-sec", type=float, default=None, help="SSS 片段长度秒，默认 3")
+    parser.add_argument("--birdnet-cooldown", type=float, default=None, help="BirdNET 冷却秒，默认 6")
+    parser.add_argument(
+        "--birdnet-conf",
+        type=float,
+        default=None,
+        help="BirdNET 置信度阈值，低于此值不输出结果，默认 0.15",
+    )
+    parser.add_argument(
+        "--birdnet-locale",
+        default=None,
+        help="鸟类名称语言，默认 zh（中文）；英文用 en 或 en_us",
     )
     args = parser.parse_args()
 
@@ -344,7 +414,7 @@ def main() -> None:
     elif args.mode == "visual":
         run_visual_flow(args, visual_config, visual_track_config)
     else:
-        run_fusion_flow(args, odas_config, sound_config, visual_config)
+        run_fusion_flow(args, odas_config, sound_config, visual_config, track_config)
 
 
 if __name__ == "__main__":

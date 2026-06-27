@@ -148,10 +148,6 @@ class OdasBridge:
                         continue
                     line = json.dumps(flat, ensure_ascii=False)
                     self._broadcast(line)
-                    print(
-                        f"声源 x={flat['x']:.3f}, y={flat['y']:.3f}, "
-                        f"z={flat['z']:.3f}, E={flat['E']:.3f}"
-                    )
         except OSError as exc:
             if self._running:
                 print(f"ODAS 连接断开: {exc}")

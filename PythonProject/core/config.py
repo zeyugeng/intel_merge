@@ -35,6 +35,38 @@ class ODASConfig:
     config_path: Path = field(default_factory=lambda: REPO_ROOT / "odas" / "config" / "myArray_fusion.cfg")
     lib_path: Path = field(default_factory=lambda: REPO_ROOT / "odas" / "build" / "lib")
     log_path: Path = field(default_factory=lambda: PROJECT_ROOT / "output" / "odaslive.log")
+    sss_dir: Path = field(default_factory=lambda: REPO_ROOT / "odas")
+
+
+@dataclass
+class SSSConfig:
+    """ODAS SSS 分离音轨（separated.raw / postfiltered.raw）读取参数。"""
+
+    sample_rate: int = 32000
+    hop_size: int = 512
+    n_bits: int = 16
+    # 与 myArray_fusion.cfg 中 sst.N_inactive 条目数一致（4 路分离）
+    n_channels: int = 4
+    separated_path: Path = field(
+        default_factory=lambda: REPO_ROOT / "odas" / "separated.raw"
+    )
+    postfiltered_path: Path = field(
+        default_factory=lambda: REPO_ROOT / "odas" / "postfiltered.raw"
+    )
+    clips_dir: Path = field(
+        default_factory=lambda: PROJECT_ROOT / "output" / "birdnet_clips"
+    )
+    clip_seconds: float = 3.0
+    min_clip_rms: float = 0.002
+    poll_interval: float = 0.25
+    birdnet_cooldown: float = 6.0
+    # 与 PTZTrackConfig.activity_threshold 对齐（SST activity，不是 SSL 的 E）
+    trigger_energy: float = 0.01
+    normalize_target_rms: float = 0.08
+    normalize_max_gain: float = 40.0
+    birdnet_confidence: float = 0.15
+    birdnet_locale: str = "zh"
+    use_postfiltered: bool = False
 
 
 @dataclass
@@ -77,9 +109,9 @@ class PTZTrackConfig:
     # "absolute": intelcup/main.py status_1 — atan2 算绝对角度，触发式转动
     # "velocity": 连续速度控制（比例增益）
     tracking_mode: str = "absolute"
-    activity_threshold: float = 0.001
-    trigger_interval: float = 1.0
-    move_time_ms: int = 1000
+    activity_threshold: float = 0.01
+    trigger_interval: float = 2.0
+    move_time_ms: int = 800
     invert_pan: bool = True
     kp_pan: float = 0.5
     kp_tilt: float = 0.4
