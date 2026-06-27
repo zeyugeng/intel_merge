@@ -1,0 +1,9 @@
+# Intel oneAPI numerics: oneMKL + OpenMP + TBB (Intel Distribution for Python stack).
+# 国内安装:
+#   pip install -r requirements-oneapi.txt \
+#     -i https://pypi.tuna.tsinghua.edu.cn/simple \
+#     --trusted-host pypi.tuna.tsinghua.edu.cn
+mkl>=2024.0.0
+mkl-service
+intel-openmp
+tbb

@@ -341,6 +341,17 @@ def main() -> None:
         help="OpenVINO 设备: CPU, GPU, NPU, AUTO（仅 --vision-backend openvino）",
     )
     parser.add_argument(
+        "--oneapi",
+        action="store_true",
+        help="启用 Intel oneAPI oneMKL 线程环境（加速 NumPy/SSS 音频处理）",
+    )
+    parser.add_argument(
+        "--oneapi-threads",
+        type=int,
+        default=None,
+        help="oneAPI MKL/OpenMP 线程数（默认 min(8, CPU 核数)）",
+    )
+    parser.add_argument(
         "--target-class",
         nargs="+",
         default=None,
@@ -434,6 +445,11 @@ def main() -> None:
         args.target_class = ["bird"]
 
     odas_config, sound_config, track_config, visual_config, visual_track_config = build_configs(args)
+
+    if args.oneapi:
+        from core.oneapi_runtime import apply_oneapi_env
+
+        apply_oneapi_env(num_threads=args.oneapi_threads)
 
     run_birdnet_if_requested(args.birdnet_audio)
 

@@ -6,6 +6,7 @@
 #   pip install -r requirements-birdnet.txt
 #   pip install -r requirements-gui.txt
 #   pip install -r requirements-openvino.txt
+#   pip install -r requirements-oneapi.txt
 
 -r requirements-sound-ptz.txt
 -r requirements-vision.txt
@@ -13,3 +14,4 @@
 -r requirements-gui.txt
 -r requirements-serial-ptz.txt
 -r requirements-openvino.txt
+-r requirements-oneapi.txt
