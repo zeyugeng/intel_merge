@@ -1,4 +1,4 @@
-"""USB 摄像头 + ODAS 声源 + YOLO 声视融合（无云台转动）。"""
+"""USB 摄像头 + ODAS 声源 + YOLO 声视融合 + 串口云台跟声源（主流程 fusion 模式）。"""
 
 from __future__ import annotations
 
@@ -11,9 +11,23 @@ from .sound_client import SoundSourceClient
 from .usb_camera import default_usb_camera, USBCamera
 from .visual_detector import VisualDetector
 
+# 与 sound / visual 预览一致（ptz_tracker.PREVIEW_W/H）
+PREVIEW_W = 1280
+PREVIEW_H = 720
+
+
+def _resize_for_display(frame, preview_w: int = PREVIEW_W, preview_h: int = PREVIEW_H):
+    h, w = frame.shape[:2]
+    scale = min(preview_w / w, preview_h / h)
+    return cv2.resize(
+        frame,
+        (int(w * scale), int(h * scale)),
+        interpolation=cv2.INTER_AREA,
+    )
+
 
 class USBAudioVisualFusion:
-    """intelcup 摄像头 + ODAS 声源高亮匹配目标（对应 run_fusion，镜头不跟）。"""
+    """USB 摄像头 + YOLO 检测 + ODAS 声源高亮匹配；云台由 SoundPTZTracker 并行驱动。"""
 
     def __init__(
         self,
@@ -49,6 +63,7 @@ class USBAudioVisualFusion:
             return
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(self.window_name, PREVIEW_W, PREVIEW_H)
         try:
             cv2.setWindowProperty(self.window_name, cv2.WND_PROP_TOPMOST, 1)
         except cv2.error:
@@ -56,7 +71,9 @@ class USBAudioVisualFusion:
 
         warmup = self.camera.read()
         if warmup is not None:
-            cv2.imshow(self.window_name, warmup)
+            real_h, real_w = warmup.shape[:2]
+            print(f"fusion 预览: 摄像头 {real_w}x{real_h} -> 窗口 {PREVIEW_W}x{PREVIEW_H}")
+            cv2.imshow(self.window_name, _resize_for_display(warmup))
             cv2.waitKey(1)
 
         print("正在加载 YOLO 模型...")
@@ -97,7 +114,7 @@ class USBAudioVisualFusion:
                         2,
                     )
 
-                cv2.imshow(self.window_name, frame_copy)
+                cv2.imshow(self.window_name, _resize_for_display(frame_copy))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:

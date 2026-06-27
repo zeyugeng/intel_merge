@@ -496,12 +496,14 @@ class SoundPTZTracker:
         sound_config: Optional[SoundConfig] = None,
         track_config: Optional[PTZTrackConfig] = None,
         preview: Optional[CameraPreviewThread] = None,
+        headless: bool = False,
     ):
         self.backend = backend
         self.sound_config = sound_config or SoundConfig()
         self.track_config = track_config or PTZTrackConfig()
         self.controller = SoundToVelocityController(self.sound_config, self.track_config)
         self.preview = preview
+        self.headless = headless
 
     def _move_absolute(self, pan_angle: float, tilt_angle: float) -> bool:
         move_angle = getattr(self.backend, "move_angle", None)
@@ -592,11 +594,17 @@ class SoundPTZTracker:
             owns_preview = preview.start()
 
         mode = self.track_config.tracking_mode
-        if mode == "absolute":
-            print("声源跟踪已启动（absolute / intelcup/main.py）：对着麦克风发声，云台将转向声源方向")
-        else:
-            print("声源跟踪已启动（velocity）：对着麦克风发声，云台将连续跟随声源")
-        print("按 q 退出预览窗口（无预览时 Ctrl+C）")
+        if not self.headless:
+            if mode == "absolute":
+                print("声源跟踪已启动（absolute / intelcup/main.py）：对着麦克风发声，云台将转向声源方向")
+            else:
+                print("声源跟踪已启动（velocity）：对着麦克风发声，云台将连续跟随声源")
+            if preview is not None:
+                print("按 q 退出预览窗口")
+            else:
+                print("无预览时 Ctrl+C 退出")
+        elif preview is None:
+            print("声源云台后台运行中（fusion 窗口按 q 退出）")
 
         moving = False
         try:

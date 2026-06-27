@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+from dataclasses import replace
 from pathlib import Path
 from threading import Thread
 
@@ -272,6 +273,24 @@ def run_fusion_flow(args, odas_config, sound_config, visual_config, track_config
 
         birdnet_thread = start_birdnet_watcher_if_requested(args, sound_config, track_config)
 
+        ptz_thread: Thread | None = None
+        if not args.no_fusion_ptz:
+            ptz = create_ptz_backend(args, track_config, "sound")
+            if ptz.connect():
+                fusion_track_config = replace(track_config, show_preview=False)
+                ptz_tracker = SoundPTZTracker(
+                    ptz,
+                    sound_config=sound_config,
+                    track_config=fusion_track_config,
+                    preview=None,
+                    headless=True,
+                )
+                ptz_thread = Thread(target=ptz_tracker.run, daemon=True)
+                ptz_thread.start()
+                print("fusion: 声源驱动云台已启动（与 YOLO 声视高亮并行）")
+            else:
+                print("fusion: 云台未连接，仅声视高亮（镜头不跟）")
+
         fusion = USBAudioVisualFusion(
             sound_config=sound_config,
             visual_config=visual_config,
@@ -287,13 +306,13 @@ def run_fusion_flow(args, odas_config, sound_config, visual_config, track_config
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="主流程：sound=status_1 | visual=status_2 | fusion=声视高亮",
+        description="主流程：fusion=声源跟云台+YOLO高亮+BirdNET | sound=仅声源跟云台 | visual=视觉跟云台",
     )
     parser.add_argument(
         "--mode",
         choices=("sound", "visual", "fusion"),
-        default="sound",
-        help="sound=声源跟云台(status_1); visual=YOLO跟云台(status_2); fusion=声视融合",
+        default="fusion",
+        help="fusion=主流程(默认); sound=声源跟云台(status_1); visual=YOLO跟云台(status_2)",
     )
     parser.add_argument(
         "--no-preview",
@@ -304,10 +323,10 @@ def main() -> None:
         "--tracking-mode",
         choices=("absolute", "velocity"),
         default=None,
-        help="sound 模式：absolute=main.py atan2；velocity=连续速度",
+        help="sound/fusion 声源跟云台：absolute=触发式绝对角；velocity=连续速度",
     )
-    parser.add_argument("--activity", type=float, default=None, help="sound absolute 阈值，默认 0.01")
-    parser.add_argument("--trigger-interval", type=float, default=None, help="sound absolute 触发间隔秒，默认 2.0")
+    parser.add_argument("--activity", type=float, default=None, help="sound/fusion absolute 阈值，默认 0.01")
+    parser.add_argument("--trigger-interval", type=float, default=None, help="sound/fusion absolute 触发间隔秒，默认 2.0")
     parser.add_argument("--energy", type=float, default=None, help="sound velocity / fusion 能量阈值")
     parser.add_argument("--conf", type=float, default=0.3, help="visual/fusion YOLO 置信度")
     parser.add_argument(
@@ -361,6 +380,11 @@ def main() -> None:
     parser.add_argument("--deadzone", type=float, default=None, help="sound velocity 死区")
     parser.add_argument("--max-speed", type=float, default=None, help="sound velocity 最大速度")
     parser.add_argument("--control-interval", type=float, default=None, help="sound velocity 刷新间隔")
+    parser.add_argument(
+        "--no-fusion-ptz",
+        action="store_true",
+        help="fusion 模式：不驱动云台，仅 YOLO 声视高亮",
+    )
     parser.add_argument("--odas-cfg", type=Path, default=ODASConfig().config_path, help="ODAS 配置")
     parser.add_argument("--show-odas-log", action="store_true", help="ODAS 日志打到终端")
     parser.add_argument("--ptz-backend", choices=("serial", "onvif"), default="serial")
@@ -416,9 +440,9 @@ def main() -> None:
     mode_labels = {
         "sound": "声源跟踪 (status_1)",
         "visual": "视觉跟云台 (status_2)",
-        "fusion": "USB 声视融合",
+        "fusion": "主流程: 声源跟云台 + YOLO 声视高亮 + BirdNET",
     }
-    print(f"=== 主流程: {mode_labels[args.mode]} ===")
+    print(f"=== {mode_labels[args.mode]} ===")
 
     if args.mode == "sound":
         if args.no_preview:
@@ -429,6 +453,9 @@ def main() -> None:
     elif args.mode == "visual":
         run_visual_flow(args, visual_config, visual_track_config)
     else:
+        if args.vision_backend is None:
+            print("提示: fusion 推荐 OpenVINO 视觉: --vision-backend openvino")
+        print("提示: fusion 窗口「Bird Monitor (USB Fusion)」，按 q 退出")
         run_fusion_flow(args, odas_config, sound_config, visual_config, track_config)
 
 
