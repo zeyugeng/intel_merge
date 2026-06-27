@@ -48,20 +48,72 @@ def port_is_available(host: str, port: int) -> bool:
             return False
 
 
-def cleanup_stale_services(ports: tuple[int, ...]) -> None:
-    """Best-effort cleanup of old bridge/ODAS debug processes."""
+def _kill_port_listeners(port: int) -> None:
+    """Kill processes listening on a TCP port (e.g. intelcup/main.py on 5000)."""
+    subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
+    result = subprocess.run(
+        ["lsof", "-t", f"-i:{port}"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return
+    for line in result.stdout.splitlines():
+        try:
+            pid = int(line.strip())
+        except ValueError:
+            continue
+        if pid in (os.getpid(), os.getppid()):
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
+
+def ports_ready(host: str, python_port: int, odas_port: int) -> bool:
+    return port_is_available(host, python_port) and port_is_available(host, odas_port)
+
+
+def cleanup_stale_services(ports: tuple[int, ...], host: str = "127.0.0.1") -> None:
+    """Best-effort cleanup of old bridge/ODAS/debug processes and port holders."""
     patterns = (
         "odas_bridge.py",
         "odaslive",
         "run_sound_client.py",
+        "intelcup/main.py",
+        "intel_merge/intelcup",
     )
     for pattern in patterns:
         _kill_processes_matching(pattern)
 
     for port in ports:
-        subprocess.run(["fuser", "-k", f"{port}/tcp"], capture_output=True)
-
+        _kill_port_listeners(port)
     time.sleep(1.5)
+
+    busy = [p for p in ports if not port_is_available(host, p)]
+    if not busy:
+        return
+
+    for port in busy:
+        _kill_port_listeners(port)
+        subprocess.run(["fuser", "-k", "-KILL", f"{port}/tcp"], capture_output=True)
+    time.sleep(0.5)
+
+    still_busy = [p for p in ports if not port_is_available(host, p)]
+    if still_busy:
+        holders = subprocess.run(
+            ["lsof", "-i", f":{still_busy[0]}"],
+            capture_output=True,
+            text=True,
+        )
+        detail = (holders.stdout or holders.stderr or "").strip()
+        print(f"端口仍被占用: {still_busy}")
+        if detail:
+            print(detail)
+        print("请先在其他终端 Ctrl+C 停掉 python3 main.py，或执行:")
+        print("  pkill -f 'intel_merge/intelcup'; pkill -f odas_bridge; pkill -f odaslive")
+        print("  fuser -k 5000/tcp 9001/tcp")
 
 
 class SoundPipeline:
@@ -78,7 +130,10 @@ class SoundPipeline:
     def start(self, clean_stale: bool = True, mic_check: bool = False) -> None:
         if clean_stale:
             print("清理旧进程与占用端口...")
-            cleanup_stale_services((self.config.python_port, self.config.odas_port))
+            cleanup_stale_services(
+                (self.config.python_port, self.config.odas_port),
+                host=self.config.host,
+            )
 
         if mic_check:
             self._preflight_microphone()
@@ -126,7 +181,8 @@ class SoundPipeline:
         ):
             raise RuntimeError(
                 f"端口 {self.config.odas_port}/{self.config.python_port} 仍被占用。"
-                " 请先执行: pkill -f odas_bridge; pkill -f odaslive; "
+                " 请先 Ctrl+C 退出 intelcup/main.py，或执行: "
+                "pkill -f 'intelcup/main.py'; pkill -f odas_bridge; pkill -f odaslive; "
                 "fuser -k 5000/tcp 9001/tcp"
             )
 

@@ -25,12 +25,13 @@ class VisualDetector:
         pixel_x = max(0.0, min(float(pixel_x), frame_width))
         return (pixel_x / frame_width) * 2 - 1.0
 
-    def detect(self, frame, frame_width: int, frame_height: int) -> List[Dict]:
+    def detect(self, frame, frame_width: int, frame_height: int, imgsz: int = 640) -> List[Dict]:
         results = self.model(
             frame,
             conf=self.config.conf,
             verbose=False,
             device=self.config.device,
+            imgsz=imgsz,
         )
         detections: List[Dict] = []
         if results[0].boxes is None:

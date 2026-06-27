@@ -67,7 +67,7 @@ def predict_audio(audio_path: Union[str, Path] = DEFAULT_AUDIO_PATH):
 
     if hasattr(birdnet, "load"):
         return _predict_modern(audio_path)
-    return _predict_legacy(audio_path)3
+    return _predict_legacy(audio_path)
 
 
 def format_predictions(predictions: Any) -> str:

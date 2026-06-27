@@ -1,6 +1,5 @@
 from Camera import Camera
 from MicrophoneArray import MicrophoneArray, SoundSource,SoundSourceFrame
-from Picturepredic import Detection, PicturePredict
 from Ptz import PTZ
 from SoundPredict import SoundPredict
 import cv2
@@ -16,7 +15,7 @@ def testcamera():
     cv2.waitKey(0)
     camera.show()
 
-def testptz():
+def testptz(default_time=1000):
     ptz = PTZ()
     ptz.move_angle(90,0)
     input()
@@ -69,4 +68,5 @@ def testsoundpredic():
     predictor.close()
 
 if __name__ == '__main__':
-    testcamera()
+    testptz()
+    

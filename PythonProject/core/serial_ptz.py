@@ -52,6 +52,22 @@ def angle_to_pwm(angle: float, n90_pwm: int, zero_pwm: float, p90_pwm: int, inve
     return int(round(pwm))
 
 
+def pwm_to_angle(
+    pwm: int,
+    n90_pwm: int,
+    zero_pwm: float,
+    p90_pwm: int,
+    invert: bool = False,
+) -> float:
+    pwm_f = float(pwm)
+    if pwm_f >= zero_pwm:
+        angle = (pwm_f - zero_pwm) / (p90_pwm - zero_pwm) * 90.0
+    else:
+        angle = (pwm_f - zero_pwm) / (zero_pwm - n90_pwm) * 90.0
+    angle = clamp(angle, -90.0, 90.0)
+    return -angle if invert else angle
+
+
 def make_cmd(servo_id: int, pwm: int, move_time_ms: int) -> str:
     return f"#{servo_id:03d}P{int(pwm):04d}T{int(move_time_ms)}!"
 
@@ -127,6 +143,24 @@ class SerialPanTiltBackend:
 
     def get_stream_uri(self) -> Optional[str]:
         return None
+
+    def get_current_angle(self) -> tuple[float, float]:
+        """返回当前记录的目标角度（与 intelcup/Ptz.py 一致，非舵机反馈）。"""
+        pan = pwm_to_angle(
+            self.pan_pwm,
+            self.config.pan_n90_pwm,
+            self.config.pan_0_pwm,
+            self.config.pan_p90_pwm,
+            self.config.pan_invert,
+        )
+        tilt = pwm_to_angle(
+            self.tilt_pwm,
+            self.config.tilt_n90_pwm,
+            self.config.tilt_0_pwm,
+            self.config.tilt_p90_pwm,
+            self.config.tilt_invert,
+        )
+        return round(pan, 2), round(tilt, 2)
 
     def center(self) -> None:
         self.move_angle(0, 0)

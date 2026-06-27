@@ -1,38 +1,46 @@
+from Camera import Camera
+from ultralytics import YOLO
 import cv2
-import sys
 
-# 1. 打印OpenCV版本
-print("OpenCV 版本:", cv2.__version__)
-print("Python 版本:", sys.version)
+def main():
+    # 1. 初始化摄像头
+    cam = Camera(camera_id=0)
+    cam.WIDTH = 1920
+    cam.HEIGHT = 1080
+    cam.FPS = 30
 
-# 2. 读取图片测试（替换为本地一张图片路径）
-img_path = "test.jpg"
-img = cv2.imread(img_path)
+    if not cam.get_camera():
+        print("摄像头打开失败，程序退出")
+        return
 
-if img is None:
-    print("图片读取失败，请检查路径！")
-else:
-    print("图片尺寸：宽={},高={},通道数={}".format(img.shape[1], img.shape[0], img.shape[2]))
-    # 弹出窗口显示图片，按任意键关闭
-    cv2.imshow("Test Image", img)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    # 2. 加载YOLOv8模型
+    model = YOLO("yolo26n.pt")  # 可替换 yolov8s.pt / yolov8m.pt
 
-# 3. 摄像头实时测试（有摄像头设备可用）
-cap = cv2.VideoCapture(0)
-if cap.isOpened():
-    print("摄像头打开成功，按 q 退出窗口")
+    window_name = "YOLOv8 Detection (q退出)"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+
+    print("开始推理画面，按下 q 关闭窗口")
+
     while True:
-        ret, frame = cap.read()
-        if not ret:
+        # 读取一帧图像
+        frame = cam.get_frame()
+        if frame is None:
             break
-        cv2.imshow("Camera", frame)
-        # 按q退出
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    cap.release()
-    cv2.destroyAllWindows()
-else:
-    print("未检测到摄像头，跳过摄像头测试")
 
-#../build/bin/odaslive -c myArray.cfg
+        # 3. YOLO推理 + 绘制检测框
+        results = model(frame, verbose=False)
+        det_frame = results[0].plot()
+
+        # 显示画面
+        cv2.imshow(window_name, det_frame)
+
+        # 按键退出
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+
+    # 释放资源
+    cam.release()
+
+if __name__ == "__main__":
+    main()

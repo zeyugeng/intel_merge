@@ -197,6 +197,19 @@ class MicrophoneArray:
             raw=obj,
         )
 
+    @staticmethod
+    def is_silent_frame(frame: Optional[SoundSourceFrame], threshold: float = 0.001) -> bool:
+        # 无帧数据，直接判定静音
+        if frame is None:
+            print("no sound_frame")
+            return True
+        # 遍历所有声源，任意一个activity超过阈值则不是静音
+        for src in frame.sources:
+            if src.activity > threshold:
+                return False
+        # 全部声源音量都低于阈值，静音
+        return True
+
 
 if __name__ == "__main__":
     mic = MicrophoneArray(host="0.0.0.0", port=5000)

@@ -99,7 +99,7 @@ class PTZ:
         self.pan_pwm = pan_pwm
         self.tilt_pwm = tilt_pwm
 
-        time.sleep(t / 1000 + 0.2)
+        #time.sleep(t / 1000 + 0.2)S
 
     def move_angle(self, pan_angle, tilt_angle, t=None):
         """
@@ -156,3 +156,8 @@ class PTZ:
 
     def close(self):
         self.ser.close()
+
+
+if __name__ == '__main__':
+    ptz = PTZ()
+    ptz.center()
