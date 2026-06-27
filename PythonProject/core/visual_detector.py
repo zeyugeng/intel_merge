@@ -6,19 +6,32 @@ import numpy as np
 from ultralytics import YOLO
 
 from .config import VisualConfig
+from .openvino_runtime import resolve_yolo_openvino_dir, ultralytics_device_for_ov
 from .paths import YOLO_MODEL_PATH
 
 
 class VisualDetector:
-    """YOLO26 视觉检测（默认 COCO bird 类别）。"""
+    """YOLO26 视觉检测（默认 COCO bird 类别；可选 OpenVINO 后端）。"""
 
     def __init__(self, config: Optional[VisualConfig] = None):
         self.config = config or VisualConfig()
-        model_path = self.config.model_path or str(YOLO_MODEL_PATH)
-        if not Path(model_path).exists():
-            raise FileNotFoundError(f"未找到模型权重: {model_path}")
+        pt_path = Path(self.config.model_path or YOLO_MODEL_PATH)
+        if not pt_path.exists():
+            raise FileNotFoundError(f"未找到模型权重: {pt_path}")
+
+        backend = (self.config.backend or "pytorch").lower()
+        if backend == "openvino":
+            ov_dir = resolve_yolo_openvino_dir(pt_path, auto_export=True)
+            model_path = str(ov_dir)
+            self._infer_device = ultralytics_device_for_ov(self.config.ov_device)
+            print(f"视觉推理: OpenVINO ({self._infer_device}) <- {ov_dir}")
+        else:
+            model_path = str(pt_path)
+            self._infer_device = self.config.device
+
         self.model = YOLO(model_path)
-        self.model.fuse()
+        if backend != "openvino":
+            self.model.fuse()
 
     @staticmethod
     def normalize_x(pixel_x: float, frame_width: int) -> float:
@@ -30,7 +43,7 @@ class VisualDetector:
             frame,
             conf=self.config.conf,
             verbose=False,
-            device=self.config.device,
+            device=self._infer_device,
             imgsz=imgsz,
         )
         detections: List[Dict] = []

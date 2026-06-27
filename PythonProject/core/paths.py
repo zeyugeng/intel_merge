@@ -13,4 +13,5 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 DOCS_DIR = PROJECT_ROOT / "docs"
 
 YOLO_MODEL_PATH = MODELS_DIR / "yolo26n.pt"
+YOLO_OPENVINO_DIR = MODELS_DIR / "yolo26n_openvino_model"
 DEFAULT_AUDIO_PATH = AUDIO_DIR / "soundscape.wav"

@@ -76,6 +76,8 @@ class VisualConfig:
     # COCO 预训练模型中 14 = bird；后续可换成鸟类专用权重
     target_classes: tuple = (14,)
     device: str = "cpu"
+    backend: str = "pytorch"  # pytorch | openvino
+    ov_device: str = "CPU"
 
 
 @dataclass

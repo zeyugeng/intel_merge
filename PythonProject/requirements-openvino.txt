@@ -1,0 +1,4 @@
+# Intel OpenVINO runtime for YOLO export/inference on CPU / GPU / NPU.
+# 国内安装建议换源，例如:
+#   pip install -r requirements-openvino.txt -i https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn
+openvino>=2024.4.0

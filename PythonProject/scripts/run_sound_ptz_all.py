@@ -71,6 +71,10 @@ def build_configs(args):
         track_config.control_interval = args.control_interval
 
     visual_config = VisualConfig(conf=args.conf)
+    if args.vision_backend is not None:
+        visual_config.backend = args.vision_backend
+    if args.ov_device is not None:
+        visual_config.ov_device = args.ov_device
     if args.target_class:
         from ultralytics import YOLO
 
@@ -306,6 +310,17 @@ def main() -> None:
     parser.add_argument("--trigger-interval", type=float, default=None, help="sound absolute 触发间隔秒，默认 2.0")
     parser.add_argument("--energy", type=float, default=None, help="sound velocity / fusion 能量阈值")
     parser.add_argument("--conf", type=float, default=0.3, help="visual/fusion YOLO 置信度")
+    parser.add_argument(
+        "--vision-backend",
+        choices=("pytorch", "openvino"),
+        default=None,
+        help="视觉推理后端，默认 pytorch；Intel 平台推荐 openvino",
+    )
+    parser.add_argument(
+        "--ov-device",
+        default=None,
+        help="OpenVINO 设备: CPU, GPU, NPU, AUTO（仅 --vision-backend openvino）",
+    )
     parser.add_argument(
         "--target-class",
         nargs="+",
