@@ -1,0 +1,2 @@
+# Performance profiling (CPU, memory, optional RAPL power).
+psutil>=5.9.0
