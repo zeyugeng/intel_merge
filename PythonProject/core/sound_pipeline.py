@@ -317,6 +317,7 @@ def ensure_ports_free(
         return True
 
     _report_busy_ports(ports, host)
+    print("或执行: bash scripts/stop_services.sh")
     return False
 
 

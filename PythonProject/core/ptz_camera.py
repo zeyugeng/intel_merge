@@ -22,6 +22,11 @@ class PTZCameraController:
         self.profile_token = None
         self.stream_uri: Optional[str] = None
         self.connected = False
+        self._pan_angle = 0.0
+        self._tilt_angle = 0.0
+
+    def get_current_angle(self) -> tuple[float, float]:
+        return self._pan_angle, self._tilt_angle
 
     def connect(self) -> bool:
         try:
@@ -42,6 +47,36 @@ class PTZCameraController:
             self.connected = False
             print(f"连接云台失败: {exc}")
             return False
+
+    def center(self, move_time_ms: int | None = None) -> None:
+        """云台回正到水平/俯仰 0°。"""
+        self.move_angle(0.0, 0.0, move_time_ms)
+
+    def move_angle(self, pan_angle: float, tilt_angle: float, move_time_ms: int | None = None) -> None:
+        """声源坐标算出的绝对角度（度）→ ONVIF AbsoluteMove。"""
+        if not self.connected or self.ptz_service is None:
+            return
+        pan_norm = max(-1.0, min(1.0, pan_angle / 90.0))
+        tilt_norm = max(-1.0, min(1.0, tilt_angle / 90.0))
+        move_ms = 800 if move_time_ms is None else max(100, move_time_ms)
+        speed = max(0.1, min(1.0, 800.0 / move_ms))
+        try:
+            request = self.ptz_service.create_type("AbsoluteMove")
+            request.ProfileToken = self.profile_token
+            request.Position = {
+                "PanTilt": {"x": pan_norm, "y": tilt_norm},
+                "Zoom": {"x": 0.0},
+            }
+            request.Speed = {
+                "PanTilt": {"x": speed, "y": speed},
+                "Zoom": {"x": 0.0},
+            }
+            self.ptz_service.AbsoluteMove(request)
+            self._pan_angle = pan_angle
+            self._tilt_angle = tilt_angle
+            print(f"云台转向: pan={pan_angle:.2f}, tilt={tilt_angle:.2f}")
+        except Exception as exc:
+            print(f"云台绝对角度失败: {exc}")
 
     def move_ptz(self, pan_speed: float = 0.0, tilt_speed: float = 0.0, zoom_speed: float = 0.0) -> None:
         if not self.connected or self.ptz_service is None:

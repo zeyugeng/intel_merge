@@ -46,6 +46,34 @@ class USBCamera:
     def open(self) -> bool:
         return self._camera.get_camera()
 
+    @classmethod
+    def open_first_available(
+        cls,
+        preferred_id: Optional[int] = None,
+        width: int = 1920,
+        height: int = 1080,
+        fps: int = 30,
+        max_probe: int = 8,
+    ) -> Optional["USBCamera"]:
+        """Try preferred /dev/videoN, then scan other indices."""
+        candidates: list[int] = []
+        if preferred_id is not None:
+            candidates.append(preferred_id)
+        for cid in range(max_probe):
+            if cid not in candidates:
+                candidates.append(cid)
+
+        for cid in candidates:
+            dev = f"/dev/video{cid}"
+            if not os.path.exists(dev):
+                continue
+            cam = cls(camera_id=cid, width=width, height=height, fps=fps)
+            if cam.open():
+                print(f"已打开 USB 摄像头: {dev} ({width}x{height})")
+                return cam
+            print(f"无法打开 {dev}，尝试下一个…")
+        return None
+
     def read(self) -> Optional[Tuple[object, ...]]:
         frame = self._camera.get_frame()
         if frame is None:
@@ -67,7 +95,13 @@ class USBCamera:
 
 
 def default_usb_camera() -> USBCamera:
-    camera_id = int(os.getenv("PTZ_PREVIEW_CAMERA_ID", "0"))
     width = int(os.getenv("PTZ_PREVIEW_WIDTH", "1920"))
     height = int(os.getenv("PTZ_PREVIEW_HEIGHT", "1080"))
-    return USBCamera(camera_id=camera_id, width=width, height=height)
+    env_id = os.getenv("PTZ_PREVIEW_CAMERA_ID")
+    preferred = int(env_id) if env_id is not None else None
+    cam = USBCamera.open_first_available(preferred_id=preferred, width=width, height=height)
+    if cam is not None:
+        return cam
+    raise RuntimeError(
+        "未找到可用 USB 摄像头。请执行 ls /dev/video* 并设置 PTZ_PREVIEW_CAMERA_ID=1"
+    )

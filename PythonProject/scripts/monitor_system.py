@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime
@@ -24,7 +25,21 @@ def main() -> None:
     parser.add_argument("--duration", type=float, default=60.0, help="监控秒数")
     parser.add_argument("--interval", type=float, default=1.0, help="采样间隔秒")
     parser.add_argument("--save", action="store_true", help="保存 CSV")
+    parser.add_argument(
+        "--rapl-sudo",
+        action="store_true",
+        help="通过 sudo cat 读 RAPL（普通用户运行）",
+    )
     args = parser.parse_args()
+
+    if os.geteuid() == 0:
+        print("错误: 不要用 sudo 运行；请: python scripts/monitor_system.py --rapl-sudo")
+        raise SystemExit(1)
+
+    if args.rapl_sudo:
+        from core.performance_monitor import enable_rapl_sudo
+
+        enable_rapl_sudo()
 
     rapl_ok = rapl_available()
     print(f"=== 系统监控 {args.duration}s (间隔 {args.interval}s) ===")

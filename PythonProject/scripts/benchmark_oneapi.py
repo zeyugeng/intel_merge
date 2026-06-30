@@ -36,14 +36,15 @@ def _sss_pipeline_bench(raw_path: Path, repeats: int) -> None:
         return
 
     def run_once():
-        audio = read_growing_pcm_tail(
+        result = read_growing_pcm_tail(
             raw_path,
             sample_rate=32000,
             hop_size=512,
             n_channels=4,
             duration_sec=3.0,
         )
-        if audio is not None:
+        if result is not None:
+            audio, _ch = result
             normalize_for_birdnet(audio)
 
     _bench("SSS 读取+归一化", run_once, repeats=repeats)

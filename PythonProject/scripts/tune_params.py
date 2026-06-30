@@ -84,9 +84,8 @@ def main() -> None:
     print("  --oneapi-threads N  限制 MKL 线程，CPU 占用高时可设为 4")
     print()
     print("性能测试:")
-    print("  python scripts/benchmark_pipeline.py --all --oneapi --save")
-    print("  python scripts/monitor_system.py --duration 120 --save")
-    print("  sudo python scripts/benchmark_pipeline.py --all  # 含 RAPL 功耗")
+    print("  python scripts/benchmark_pipeline.py --all --oneapi --rapl-sudo --save")
+    print("  python scripts/monitor_system.py --duration 120 --rapl-sudo --save")
 
 
 if __name__ == "__main__":

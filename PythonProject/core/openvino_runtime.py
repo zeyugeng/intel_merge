@@ -13,9 +13,13 @@ def require_openvino() -> None:
     try:
         import openvino  # noqa: F401
     except ImportError as exc:
-        raise ImportError(
-            "未安装 OpenVINO。请执行: pip install -r requirements-openvino.txt"
-        ) from exc
+        hint = "pip install -r requirements-openvino.txt"
+        if "partially initialized module 'openvino'" in str(exc):
+            hint = (
+                "pip install --force-reinstall 'openvino>=2025.0' "
+                "(旧版 2024.6.x 可能循环导入)"
+            )
+        raise ImportError(f"OpenVINO 不可用。请执行: {hint}") from exc
 
 
 def get_core():

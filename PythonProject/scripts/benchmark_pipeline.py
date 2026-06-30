@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -106,8 +107,9 @@ def bench_birdnet(wav: Path, repeats: int, warmup: int):
 
 def bench_sss(raw: Path, repeats: int, warmup: int):
     def once():
-        audio = read_growing_pcm_tail(raw, 32000, 512, 4, 3.0)
-        if audio is not None:
+        result = read_growing_pcm_tail(raw, 32000, 512, 4, 3.0)
+        if result is not None:
+            audio, _ch = result
             normalize_for_birdnet(audio)
 
     monitor = PerformanceMonitor(interval=0.25)
@@ -207,7 +209,17 @@ def main() -> None:
     parser.add_argument("--save", action="store_true", help="保存 JSON 到 output/performance/")
     parser.add_argument("--birdnet-wav", type=Path, default=None)
     parser.add_argument("--sss-raw", type=Path, default=None)
+    parser.add_argument(
+        "--rapl-sudo",
+        action="store_true",
+        help="通过 sudo cat 读 RAPL 功耗（用普通用户运行，会提示输入 sudo 密码）",
+    )
     args = parser.parse_args()
+
+    if os.geteuid() == 0:
+        print("错误: 不要用 sudo 运行本脚本，OpenVINO 在 root 下会 import 失败。")
+        print("请改为: python scripts/benchmark_pipeline.py --all --rapl-sudo")
+        raise SystemExit(1)
 
     if not args.all and args.vision == "both":
         args.all = True
@@ -217,6 +229,14 @@ def main() -> None:
 
         apply_oneapi_env(verbose=True)
 
+    if args.rapl_sudo:
+        from core.performance_monitor import enable_rapl_sudo
+
+        if enable_rapl_sudo():
+            print("  RAPL: 已通过 sudo cat 启用")
+        else:
+            print("  RAPL: sudo cat 仍失败，请检查 sudo 权限")
+
     import psutil
 
     print("=== 系统信息 ===")
@@ -224,7 +244,7 @@ def main() -> None:
     print(f"  内存: {psutil.virtual_memory().total / (1024**3):.1f} GB")
     print(f"  RAPL 功耗可读: {rapl_available()}")
     if not rapl_available():
-        print("  提示: sudo python scripts/benchmark_pipeline.py 可读取 package 功耗")
+        print("  提示: 加 --rapl-sudo 可读 CPU package 功耗（勿 sudo 整个脚本）")
 
     frame = np.zeros((720, 1280, 3), dtype=np.uint8)
     reports = []

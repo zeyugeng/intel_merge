@@ -18,6 +18,67 @@ class AnglePTZBackend(Protocol):
     def get_current_angle(self) -> Tuple[float, float]: ...
 
 
+class VisualPTZStepper:
+    """根据 YOLO 检测框中心增量驱动云台（供 fusion / visual 共用）。"""
+
+    def __init__(
+        self,
+        backend: AnglePTZBackend,
+        track_config: Optional[VisualPTZTrackConfig] = None,
+    ):
+        self.backend = backend
+        self.track_config = track_config or VisualPTZTrackConfig()
+        self.last_ptz_time = 0.0
+
+    def step_toward_detection(self, detection: dict, frame_w: int, frame_h: int) -> bool:
+        """检测到目标时转向其画面坐标；无有效偏移时返回 False。"""
+        x1, y1, x2, y2 = detection["box"]
+        conf = detection["conf"]
+        bird_cx = (x1 + x2) / 2
+        bird_cy = (y1 + y2) / 2
+        frame_cx = frame_w / 2
+        frame_cy = frame_h / 2
+
+        error_x = (bird_cx - frame_cx) / frame_cx
+        error_y = (bird_cy - frame_cy) / frame_cy
+
+        cfg = self.track_config
+        pan_angle, tilt_angle = self.backend.get_current_angle()
+
+        pan_dir = -1.0 if cfg.invert_pan else 1.0
+        tilt_dir = -1.0 if cfg.invert_tilt else 1.0
+
+        delta_pan = 0.0
+        delta_tilt = 0.0
+        if abs(error_x) > cfg.dead_zone:
+            delta_pan = pan_dir * error_x * cfg.pan_k
+        if abs(error_y) > cfg.dead_zone:
+            delta_tilt = tilt_dir * error_y * cfg.tilt_k
+
+        delta_pan = max(-cfg.max_step, min(cfg.max_step, delta_pan))
+        delta_tilt = max(-cfg.max_step, min(cfg.max_step, delta_tilt))
+
+        need_move = abs(error_x) > cfg.dead_zone or abs(error_y) > cfg.dead_zone
+        if not need_move:
+            return False
+
+        now = time.monotonic()
+        if now - self.last_ptz_time < cfg.ptz_interval:
+            return False
+
+        target_pan = max(-90.0, min(90.0, pan_angle + delta_pan))
+        target_tilt = max(-90.0, min(90.0, tilt_angle + delta_tilt))
+        label = detection.get("label", "bird")
+        print(
+            f"鸟类跟踪: {label} conf={conf:.2f} "
+            f"cx={bird_cx:.0f},{bird_cy:.0f} error=({error_x:+.2f},{error_y:+.2f})"
+        )
+        print(f"云台转向: pan={target_pan:.2f}, tilt={target_tilt:.2f}")
+        self.backend.move_angle(target_pan, target_tilt, cfg.move_time_ms)
+        self.last_ptz_time = now
+        return True
+
+
 class VisualPTZTracker:
     """YOLO 检测目标，使画面中心对准目标（main.py status_2）。"""
 
@@ -96,13 +157,13 @@ class VisualPTZTracker:
         labels = self._target_labels()
         print(f"检测类别: {labels}")
 
+        stepper = VisualPTZStepper(self.backend, self.track_config)
+
         if warmup is not None:
             if not self._show_frame(warmup, f"YOLO 就绪 | 检测 {labels}"):
                 self.camera.release()
                 return
 
-        last_ptz_time = 0.0
-        cfg = self.track_config
         frame_idx = 0
         null_frames = 0
 
@@ -130,44 +191,14 @@ class VisualPTZTracker:
                     continue
 
                 best = max(detections, key=lambda d: d["conf"])
+                stepper.step_toward_detection(best, w, h)
+
                 x1, y1, x2, y2 = best["box"]
                 conf = best["conf"]
                 bird_cx = (x1 + x2) / 2
                 bird_cy = (y1 + y2) / 2
                 frame_cx = w / 2
                 frame_cy = h / 2
-
-                error_x = (bird_cx - frame_cx) / frame_cx
-                error_y = (bird_cy - frame_cy) / frame_cy
-
-                pan_angle, tilt_angle = self.backend.get_current_angle()
-                delta_pan = 0.0
-                delta_tilt = 0.0
-
-                pan_dir = -1.0 if cfg.invert_pan else 1.0
-                tilt_dir = -1.0 if cfg.invert_tilt else 1.0
-
-                if abs(error_x) > cfg.dead_zone:
-                    delta_pan = pan_dir * error_x * cfg.pan_k
-                if abs(error_y) > cfg.dead_zone:
-                    delta_tilt = tilt_dir * error_y * cfg.tilt_k
-
-                delta_pan = max(-cfg.max_step, min(cfg.max_step, delta_pan))
-                delta_tilt = max(-cfg.max_step, min(cfg.max_step, delta_tilt))
-
-                target_pan = max(-90.0, min(90.0, pan_angle + delta_pan))
-                target_tilt = max(-90.0, min(90.0, tilt_angle + delta_tilt))
-
-                now = time.monotonic()
-                need_move = abs(error_x) > cfg.dead_zone or abs(error_y) > cfg.dead_zone
-                if need_move and now - last_ptz_time >= cfg.ptz_interval:
-                    print(
-                        f"目标位置: cx={bird_cx:.1f}, cy={bird_cy:.1f}, conf={conf:.2f}, "
-                        f"error_x={error_x:.3f}, error_y={error_y:.3f}"
-                    )
-                    print(f"云台跟踪: pan={target_pan:.2f}, tilt={target_tilt:.2f}")
-                    self.backend.move_angle(target_pan, target_tilt, cfg.move_time_ms)
-                    last_ptz_time = now
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                 cv2.putText(

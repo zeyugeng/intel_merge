@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import statistics
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,37 @@ except ImportError:
 
 
 RAPL_BASE = Path("/sys/class/powercap/intel-rapl/intel-rapl:0")
+_RAPL_USE_SUDO = False
+
+
+def enable_rapl_sudo() -> bool:
+    """Read RAPL via `sudo cat` (use as normal user; do not sudo the whole benchmark)."""
+    global _RAPL_USE_SUDO
+    _RAPL_USE_SUDO = True
+    return rapl_available()
+
+
+def _read_sysfs_text(path: Path) -> Optional[str]:
+    try:
+        return path.read_text().strip()
+    except (OSError, PermissionError):
+        if not _RAPL_USE_SUDO:
+            return None
+        try:
+            result = subprocess.run(
+                ["sudo", "cat", str(path)],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return None
+    except ValueError:
+        return None
+    return None
 
 
 @dataclass
@@ -61,18 +93,17 @@ class PerformanceReport:
 
 
 def read_rapl_energy_joules() -> Optional[dict[str, float]]:
-    """Read Intel RAPL domain energy (J). Requires root on many systems."""
+    """Read Intel RAPL domain energy (J). Direct read or `sudo cat` if enabled."""
     if not RAPL_BASE.is_dir():
         return None
     domains: dict[str, float] = {}
-    try:
-        for domain in sorted(RAPL_BASE.glob("intel-rapl:0:*")):
-            name = (domain / "name").read_text().strip()
-            microjoules = int((domain / "energy_uj").read_text().strip())
-            domains[name] = microjoules / 1_000_000.0
-        return domains or None
-    except (OSError, PermissionError, ValueError):
-        return None
+    for domain in sorted(RAPL_BASE.glob("intel-rapl:0:*")):
+        name = _read_sysfs_text(domain / "name")
+        energy = _read_sysfs_text(domain / "energy_uj")
+        if name is None or energy is None:
+            return None
+        domains[name] = int(energy) / 1_000_000.0
+    return domains or None
 
 
 def rapl_available() -> bool:
@@ -233,6 +264,6 @@ def print_report(report: PerformanceReport) -> None:
             f" peak={report.power_watts_peak:.1f} W"
         )
     else:
-        print("  功耗(RAPL): 不可用（需 root 读 /sys/class/powercap，或 sudo turbostat）")
+        print("  功耗(RAPL): 不可用（普通用户请加 --rapl-sudo；勿 sudo 整个 benchmark）")
     if report.notes:
         print(f"  备注: {report.notes}")

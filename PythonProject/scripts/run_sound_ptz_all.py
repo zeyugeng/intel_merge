@@ -20,8 +20,9 @@ from core.config import (
     VisualConfig,
     VisualPTZTrackConfig,
 )
+from core.bird_sound_gate import BirdSoundGate
 from core.ptz_camera import PTZCameraController
-from core.ptz_tracker import MainThreadCameraPreview, SoundPTZTracker
+from core.ptz_tracker import BirdSoundPTZTracker, MainThreadCameraPreview, SoundPTZTracker
 from core.serial_ptz import SerialPTZConfig, SerialPanTiltBackend
 from core.sound_pipeline import SoundPipeline, cleanup_stale_services, ensure_ports_free, ports_ready
 from core.sss_birdnet_watcher import SSSBirdnetWatcher
@@ -132,10 +133,15 @@ def start_birdnet_watcher_if_requested(
     args,
     sound_config: SoundConfig,
     track_config: PTZTrackConfig | None = None,
+    bird_gate: BirdSoundGate | None = None,
 ) -> Thread | None:
     if not args.birdnet_live:
         return None
-    watcher = SSSBirdnetWatcher(build_sss_config(args, track_config), sound_config)
+    watcher = SSSBirdnetWatcher(
+        build_sss_config(args, track_config),
+        sound_config,
+        bird_gate=bird_gate,
+    )
     thread = Thread(target=watcher.run_loop, daemon=True)
     thread.start()
     return thread
@@ -253,7 +259,14 @@ def run_visual_flow(args, visual_config, visual_track_config) -> None:
         print("\n已退出")
 
 
-def run_fusion_flow(args, odas_config, sound_config, visual_config, track_config) -> None:
+def run_fusion_flow(
+    args,
+    odas_config,
+    sound_config,
+    visual_config,
+    visual_track_config,
+    track_config,
+) -> None:
     ports = (odas_config.python_port, odas_config.odas_port)
     host = odas_config.host
     if not args.no_clean:
@@ -271,31 +284,82 @@ def run_fusion_flow(args, odas_config, sound_config, visual_config, track_config
         if not pipeline.wait_odas_ready(timeout=3.0):
             return
 
-        birdnet_thread = start_birdnet_watcher_if_requested(args, sound_config, track_config)
+        bird_gate = BirdSoundGate()
+        birdnet_thread = start_birdnet_watcher_if_requested(
+            args, sound_config, track_config, bird_gate=bird_gate
+        )
 
-        ptz_thread: Thread | None = None
+        ptz_backend = None
         if not args.no_fusion_ptz:
-            ptz = create_ptz_backend(args, track_config, "sound")
-            if ptz.connect():
-                fusion_track_config = replace(track_config, show_preview=False)
-                ptz_tracker = SoundPTZTracker(
-                    ptz,
-                    sound_config=sound_config,
-                    track_config=fusion_track_config,
-                    preview=None,
-                    headless=True,
-                )
-                ptz_thread = Thread(target=ptz_tracker.run, daemon=True)
-                ptz_thread.start()
-                print("fusion: 声源驱动云台已启动（与 YOLO 声视高亮并行）")
+            fusion_ptz_mode = getattr(args, "fusion_ptz", "bird_sound")
+            if fusion_ptz_mode == "bird_sound":
+                if not args.birdnet_live:
+                    print("警告: 鸟声跟云台需要 BirdNET，请去掉 --no-birdnet-live")
+                ptz = create_ptz_backend(args, track_config, "sound")
+                if ptz.connect():
+                    fusion_track_config = replace(track_config, show_preview=False)
+                    ptz_tracker = BirdSoundPTZTracker(
+                        ptz,
+                        bird_gate=bird_gate,
+                        sound_config=sound_config,
+                        track_config=fusion_track_config,
+                        preview=None,
+                        headless=True,
+                    )
+                    Thread(target=ptz_tracker.run, daemon=True).start()
+                    print("fusion: 鸟声通道快速预转向 + BirdNET 异步确认")
+                else:
+                    print("fusion: 云台未连接，BirdNET/画面仍运行")
+                    print("  请检查串口: ls /dev/ttyUSB*  并安装 pip install pyserial")
+            elif fusion_ptz_mode == "sound":
+                ptz = create_ptz_backend(args, track_config, "sound")
+                if ptz.connect():
+                    fusion_track_config = replace(track_config, show_preview=False)
+                    ptz_tracker = SoundPTZTracker(
+                        ptz,
+                        sound_config=sound_config,
+                        track_config=fusion_track_config,
+                        preview=None,
+                        headless=True,
+                    )
+                    ptz_thread = Thread(target=ptz_tracker.run, daemon=True)
+                    ptz_thread.start()
+                    mode = track_config.tracking_mode
+                    print(
+                        f"fusion: 声源驱动云台（{mode}，阈值 {track_config.activity_threshold}）"
+                    )
+                    print("  警告: 此模式有声源即转，非鸟类坐标跟踪")
+                else:
+                    print("fusion: 云台未连接，仅声视高亮")
+                    print("  请检查串口: ls /dev/ttyUSB*  并安装 pip install pyserial")
             else:
-                print("fusion: 云台未连接，仅声视高亮（镜头不跟）")
+                ptz = create_ptz_backend(args, track_config, "visual")
+                if ptz.connect():
+                    ptz_backend = ptz
+                    print("fusion: 鸟类视觉坐标驱动云台（仅检测到鸟时转向）")
+                else:
+                    print("fusion: 云台未连接，仅 YOLO 检测与声源高亮")
+                    print("  请检查串口: ls /dev/ttyUSB*  并安装 pip install pyserial")
 
         fusion = USBAudioVisualFusion(
             sound_config=sound_config,
             visual_config=visual_config,
+            ptz_backend=ptz_backend,
+            visual_track_config=visual_track_config,
         )
-        fusion.run()
+        try:
+            fusion.run()
+        except RuntimeError as exc:
+            if "USB 摄像头" in str(exc) or "摄像头" in str(exc):
+                print(str(exc))
+                print("声源跟云台 + BirdNET 仍在后台运行，按 Ctrl+C 退出")
+                try:
+                    while True:
+                        time.sleep(1.0)
+                except KeyboardInterrupt:
+                    print("\n已退出")
+            else:
+                raise
     except RuntimeError as exc:
         print(f"启动失败: {exc}")
     except KeyboardInterrupt:
@@ -306,7 +370,7 @@ def run_fusion_flow(args, odas_config, sound_config, visual_config, track_config
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="主流程：fusion=声源跟云台+YOLO高亮+BirdNET | sound=仅声源跟云台 | visual=视觉跟云台",
+        description="主流程：fusion=鸟声跟云台+声源高亮+BirdNET | sound=声源跟云台 | visual=YOLO跟云台",
     )
     parser.add_argument(
         "--mode",
@@ -328,7 +392,7 @@ def main() -> None:
     parser.add_argument("--activity", type=float, default=None, help="sound/fusion absolute 阈值，默认 0.01")
     parser.add_argument("--trigger-interval", type=float, default=None, help="sound/fusion absolute 触发间隔秒，默认 2.0")
     parser.add_argument("--energy", type=float, default=None, help="sound velocity / fusion 能量阈值")
-    parser.add_argument("--conf", type=float, default=0.3, help="visual/fusion YOLO 置信度")
+    parser.add_argument("--conf", type=float, default=0.2, help="visual/fusion YOLO 置信度")
     parser.add_argument(
         "--vision-backend",
         choices=("pytorch", "openvino"),
@@ -396,6 +460,12 @@ def main() -> None:
         action="store_true",
         help="fusion 模式：不驱动云台，仅 YOLO 声视高亮",
     )
+    parser.add_argument(
+        "--fusion-ptz",
+        choices=("bird_sound", "visual", "sound"),
+        default="bird_sound",
+        help="fusion 云台：bird_sound=BirdNET确认鸟声后按声源转(默认); visual=YOLO画框才转; sound=任意声源即转",
+    )
     parser.add_argument("--odas-cfg", type=Path, default=ODASConfig().config_path, help="ODAS 配置")
     parser.add_argument("--show-odas-log", action="store_true", help="ODAS 日志打到终端")
     parser.add_argument("--ptz-backend", choices=("serial", "onvif"), default="serial")
@@ -423,7 +493,7 @@ def main() -> None:
         default=True,
         help="sound/fusion：读 ODAS SSS 分离音并实时 BirdNET（默认开启，用 --no-birdnet-live 关闭）",
     )
-    parser.add_argument("--birdnet-clip-sec", type=float, default=None, help="SSS 片段长度秒，默认 3")
+    parser.add_argument("--birdnet-clip-sec", type=float, default=1.0, help="SSS 实时片段长度秒，默认 1")
     parser.add_argument("--birdnet-cooldown", type=float, default=None, help="BirdNET 冷却秒，默认 6")
     parser.add_argument(
         "--birdnet-conf",
@@ -456,7 +526,7 @@ def main() -> None:
     mode_labels = {
         "sound": "声源跟踪 (status_1)",
         "visual": "视觉跟云台 (status_2)",
-        "fusion": "主流程: 声源跟云台 + YOLO 声视高亮 + BirdNET",
+        "fusion": "主流程: 鸟声确认跟云台 + 声源高亮 + BirdNET",
     }
     print(f"=== {mode_labels[args.mode]} ===")
 
@@ -472,7 +542,9 @@ def main() -> None:
         if args.vision_backend is None:
             print("提示: fusion 推荐 OpenVINO 视觉: --vision-backend openvino")
         print("提示: fusion 窗口「Bird Monitor (USB Fusion)」，按 q 退出")
-        run_fusion_flow(args, odas_config, sound_config, visual_config, track_config)
+        run_fusion_flow(
+            args, odas_config, sound_config, visual_config, visual_track_config, track_config
+        )
 
 
 if __name__ == "__main__":

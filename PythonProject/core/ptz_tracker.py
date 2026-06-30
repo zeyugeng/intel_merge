@@ -35,6 +35,7 @@ _ensure_gui_display()
 import cv2
 
 from .config import PTZTrackConfig, SoundConfig
+from .bird_sound_gate import BirdSoundGate
 from .sound_client import SoundSourceClient
 
 
@@ -354,7 +355,7 @@ class SoundToVelocityController:
         self.track_config = track_config
 
     def compute(self, sound_x: float, sound_y: float, energy: float) -> Tuple[float, float, float]:
-        if energy <= self.sound_config.energy_threshold:
+        if energy <= self.track_config.activity_threshold:
             return 0.0, 0.0, 0.0
 
         pan = 0.0
@@ -605,6 +606,159 @@ class SoundPTZTracker:
                 print("无预览时 Ctrl+C 退出")
         elif preview is None:
             print("声源云台后台运行中（fusion 窗口按 q 退出）")
+
+        moving = False
+        try:
+            if mode == "absolute":
+                moving = self._run_absolute(sound, preview)
+            else:
+                moving = self._run_velocity(sound, preview)
+        except KeyboardInterrupt:
+            print("\n已停止跟踪")
+            raise
+        finally:
+            if moving and mode == "velocity":
+                self.backend.stop_ptz()
+            sound.stop()
+            if preview is not None and owns_preview:
+                preview.stop()
+
+
+class BirdSoundPTZTracker(SoundPTZTracker):
+    """仅在 BirdNET 近期确认鸟声时，按 ODAS 声源坐标驱动云台。"""
+
+    def __init__(
+        self,
+        backend: PTZBackend,
+        bird_gate: BirdSoundGate,
+        sound_config: Optional[SoundConfig] = None,
+        track_config: Optional[PTZTrackConfig] = None,
+        preview: Optional[CameraPreviewThread] = None,
+        headless: bool = False,
+    ):
+        super().__init__(backend, sound_config, track_config, preview, headless)
+        self.bird_gate = bird_gate
+
+    def _run_absolute(self, sound: SoundSourceClient, preview: Optional[CameraPreviewThread]) -> bool:
+        moving = False
+        last_idle_log = 0.0
+        last_target: Optional[tuple[float, float]] = None
+
+        while True:
+            if preview is not None:
+                valid, live_xyz = sound.parse_latest()
+                preview.update_sound(live_xyz if valid else self.bird_gate.get_sound_xyz())
+
+            if not self.bird_gate.is_active():
+                now = time.monotonic()
+                if now - last_idle_log >= 12.0:
+                    print("[云台] 等待 BirdNET 确认鸟声…（非鸟声/最大声源不会驱动云台）")
+                    last_idle_log = now
+                last_target = None
+                if preview is not None and not preview.is_running():
+                    return moving
+                time.sleep(0.05)
+                continue
+
+            sound_xyz = self.bird_gate.get_sound_xyz()
+            if sound_xyz is None:
+                if preview is not None and not preview.is_running():
+                    return moving
+                time.sleep(0.02)
+                continue
+
+            sx, sy, sz, energy = sound_xyz
+            _, species, conf, ch, confirmed = self.bird_gate.status()
+            pan_angle, tilt_angle = sound_xyz_to_angles(sx, sy, sz)
+            if self.track_config.invert_pan:
+                pan_angle = -pan_angle
+
+            target_key = (round(pan_angle, 1), round(tilt_angle, 1))
+            if target_key == last_target:
+                if preview is not None and not preview.is_running():
+                    return moving
+                time.sleep(0.1)
+                continue
+
+            label = species if confirmed else f"{species}*"
+            print(
+                f"鸟声跟踪: {label} ({conf:.2f}) SSS通道{ch}, "
+                f"x={sx:.3f}, y={sy:.3f}, z={sz:.3f}, E={energy:.3f}"
+            )
+            print(f"云台转向: pan={pan_angle:.2f}, tilt={tilt_angle:.2f}")
+
+            if self._move_absolute(pan_angle, tilt_angle):
+                moving = True
+                last_target = target_key
+
+            if preview is not None and not preview.is_running():
+                return moving
+
+            time.sleep(self.track_config.trigger_interval)
+
+    def _run_velocity(self, sound: SoundSourceClient, preview: Optional[CameraPreviewThread]) -> bool:
+        last_control = 0.0
+        moving = False
+        last_idle_log = 0.0
+
+        while True:
+            now = time.monotonic()
+            if preview is not None:
+                valid, live_xyz = sound.parse_latest()
+                preview.update_sound(live_xyz if valid else self.bird_gate.get_sound_xyz())
+
+            if not self.bird_gate.is_active():
+                if now - last_idle_log >= 12.0:
+                    print("[云台] 等待 BirdNET 确认鸟声…")
+                    last_idle_log = now
+                if moving:
+                    self.backend.stop_ptz()
+                    moving = False
+                if preview is not None and not preview.is_running():
+                    return moving
+                time.sleep(0.05)
+                continue
+
+            sound_xyz = self.bird_gate.get_sound_xyz()
+            if sound_xyz and now - last_control >= self.track_config.control_interval:
+                sx, sy, sz, energy = sound_xyz
+                pan, tilt, zoom = self.controller.compute(sx, sy, energy)
+                _, species, conf, ch, _confirmed = self.bird_gate.status()
+                if pan or tilt or zoom:
+                    self.backend.move_ptz(pan_speed=pan, tilt_speed=tilt, zoom_speed=zoom)
+                    moving = True
+                    print(
+                        f"鸟声跟踪 {species} ch{ch}: pan={pan:+.2f} tilt={tilt:+.2f} "
+                        f"| x={sx:+.2f} y={sy:+.2f} E={energy:.2f}"
+                    )
+                elif moving:
+                    self.backend.stop_ptz()
+                    moving = False
+                last_control = now
+
+            if preview is not None and not preview.is_running():
+                return moving
+            time.sleep(0.02)
+
+    def run(self) -> None:
+        sound = SoundSourceClient(self.sound_config)
+        sound.start()
+
+        preview = self.preview
+        owns_preview = False
+        if self.track_config.show_preview and preview is None:
+            preview = CameraPreviewThread()
+            owns_preview = preview.start()
+
+        mode = self.track_config.tracking_mode
+        if not self.headless:
+            print("鸟声跟踪已启动：BirdNET 确认鸟叫后云台转向声源方向")
+            if preview is not None:
+                print("按 q 退出预览窗口")
+            else:
+                print("无预览时 Ctrl+C 退出")
+        elif preview is None:
+            print("鸟声云台后台运行中（BirdNET 鸟声通道 → 锁定声源方向）")
 
         moving = False
         try:

@@ -5,7 +5,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 
 from .config import SoundConfig
-from .sound_format import normalize_sound_source
+from .sound_format import normalize_sound_source, parse_all_sources, source_at_channel_index
 
 
 class SoundSourceClient:
@@ -91,6 +91,28 @@ class SoundSourceClient:
                 continue
             with self._lock:
                 self._latest = payload
+
+    def parse_all_sources(self) -> list:
+        with self._lock:
+            if self._latest is None:
+                return []
+            data = self._latest
+        try:
+            return parse_all_sources(data)
+        except (TypeError, ValueError):
+            return []
+
+    def source_xyz_for_channel(self, channel: int) -> Tuple[bool, Optional[Tuple[float, float, float, float]]]:
+        """Return (x,y,z,E) for the SST track aligned with an SSS channel index."""
+        sources = self.parse_all_sources()
+        source = source_at_channel_index(sources, channel)
+        if source is None:
+            return False, None
+        sound_x = source.x
+        if self.config.invert_x:
+            sound_x = -sound_x
+        sound_x = max(-1.0, min(1.0, sound_x))
+        return True, (sound_x, source.y, source.z, source.energy)
 
     def parse_latest(self) -> Tuple[bool, Optional[Tuple[float, float, float, float]]]:
         with self._lock:

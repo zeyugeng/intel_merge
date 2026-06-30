@@ -21,11 +21,11 @@ def read_growing_pcm_tail(
     n_channels: int,
     duration_sec: float,
     n_bits: int = 16,
-) -> Optional[np.ndarray]:
+) -> Optional[Tuple[np.ndarray, int]]:
     """
     Read the tail of a growing interleaved PCM file written by ODAS SSS.
 
-    Returns float32 mono audio shaped (n_samples,) or None if not enough data.
+    Returns (float32 mono audio, channel_index) or None if not enough data.
     ODAS writes int16 interleaved frames: [ch0 hop][ch1 hop]...[chN hop] per block.
     """
     if not path.is_file():
@@ -64,10 +64,11 @@ def read_growing_pcm_tail(
     mono = multichannel[:, channel]
 
     target_len = min(len(mono), want_samples)
-    if target_len < sample_rate * 0.5:
+    min_samples = max(int(sample_rate * 0.2), int(want_samples * 0.4))
+    if target_len < min_samples:
         return None
 
-    return mono[-target_len:]
+    return mono[-target_len:], channel
 
 
 def _pick_loudest_channel(multichannel: np.ndarray) -> int:

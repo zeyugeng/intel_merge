@@ -45,6 +45,37 @@ def normalize_sound_source(payload: Dict[str, Any]) -> Optional[SoundSource]:
     return None
 
 
+def parse_all_sources(payload: Dict[str, Any]) -> list[SoundSource]:
+    """Return every tracked source in an ODAS SST / flat payload."""
+    src = payload.get("src")
+    if isinstance(src, list) and src:
+        sources: list[SoundSource] = []
+        for item in src:
+            if not isinstance(item, dict):
+                continue
+            sources.append(
+                SoundSource(
+                    x=float(item.get("x", 0)),
+                    y=float(item.get("y", 0)),
+                    z=float(item.get("z", 0)),
+                    energy=_source_energy(item),
+                )
+            )
+        return sources
+
+    one = normalize_sound_source(payload)
+    return [one] if one is not None else []
+
+
+def source_at_channel_index(sources: list[SoundSource], channel: int) -> Optional[SoundSource]:
+    """Map SSS separation channel index to the matching SST track."""
+    if not sources:
+        return None
+    if 0 <= channel < len(sources):
+        return sources[channel]
+    return sources[min(channel, len(sources) - 1)]
+
+
 def _source_energy(source: Dict[str, Any]) -> float:
     """Return ODAS confidence from SSL ``E`` or SST ``activity`` payloads."""
     return float(source.get("E", source.get("activity", 0)))

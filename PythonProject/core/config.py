@@ -56,10 +56,10 @@ class SSSConfig:
     clips_dir: Path = field(
         default_factory=lambda: PROJECT_ROOT / "output" / "birdnet_clips"
     )
-    clip_seconds: float = 3.0
+    clip_seconds: float = 0.5
     min_clip_rms: float = 0.002
-    poll_interval: float = 0.25
-    birdnet_cooldown: float = 6.0
+    poll_interval: float = 0.1
+    birdnet_cooldown: float = 2.0
     # 与 PTZTrackConfig.activity_threshold 对齐（SST activity，不是 SSL 的 E）
     trigger_energy: float = 0.01
     normalize_target_rms: float = 0.08
@@ -111,8 +111,8 @@ class PTZTrackConfig:
     # "absolute": intelcup/main.py status_1 — atan2 算绝对角度，触发式转动
     # "velocity": 连续速度控制（比例增益）
     tracking_mode: str = "absolute"
-    activity_threshold: float = 0.01
-    trigger_interval: float = 2.0
+    activity_threshold: float = 0.001
+    trigger_interval: float = 0.25
     move_time_ms: int = 800
     invert_pan: bool = True
     kp_pan: float = 0.5

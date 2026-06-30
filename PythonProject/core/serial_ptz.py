@@ -7,9 +7,22 @@ still uses ONVIF PTZ.
 
 from __future__ import annotations
 
+import glob
 import time
 from dataclasses import dataclass
 from typing import Optional
+
+
+def candidate_serial_ports(requested: str | None = None) -> list[str]:
+    """Return serial device paths to try (requested first, then USB/ACM)."""
+    ports: list[str] = []
+    if requested:
+        ports.append(requested)
+    for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*"):
+        for path in sorted(glob.glob(pattern)):
+            if path not in ports:
+                ports.append(path)
+    return ports
 
 
 @dataclass
@@ -85,16 +98,26 @@ class SerialPanTiltBackend:
         self.stream_uri: Optional[str] = None
 
     def connect(self) -> bool:
-        try:
-            import serial
+        import serial
 
-            self.ser = serial.Serial(self.config.port, self.config.baud, timeout=1)
-            time.sleep(1)
-            print(f"成功连接串口云台 {self.config.port}")
-            return True
-        except Exception as exc:
-            print(f"连接串口云台失败: {exc}")
-            return False
+        last_exc: Exception | None = None
+        for port in candidate_serial_ports(self.config.port):
+            try:
+                self.ser = serial.Serial(port, self.config.baud, timeout=1)
+                time.sleep(1)
+                self.config.port = port
+                print(f"成功连接串口云台 {port}")
+                return True
+            except Exception as exc:
+                last_exc = exc
+                self.ser = None
+
+        print(f"连接串口云台失败: {last_exc}")
+        tried = candidate_serial_ports(self.config.port)
+        if tried:
+            print(f"  已尝试: {', '.join(tried)}")
+        print("  请确认舵机控制板已插入，或指定: --serial-port /dev/ttyUSB0")
+        return False
 
     def move_angle(self, pan_angle: float, tilt_angle: float, move_time_ms: int | None = None) -> None:
         if self.ser is None:
@@ -162,8 +185,8 @@ class SerialPanTiltBackend:
         )
         return round(pan, 2), round(tilt, 2)
 
-    def center(self) -> None:
-        self.move_angle(0, 0)
+    def center(self, move_time_ms: int | None = None) -> None:
+        self.move_angle(0, 0, move_time_ms)
 
     def close(self) -> None:
         if self.ser is not None:

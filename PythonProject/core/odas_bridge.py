@@ -52,12 +52,19 @@ def extract_json_objects(buffer: str) -> Tuple[List[Dict[str, Any]], str]:
     return objects, buffer[start:]
 
 
-def flatten_odas_payload(payload: Dict[str, Any]) -> Optional[Dict[str, float]]:
+def flatten_odas_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Convert raw ODAS JSON to the flat payload consumed by Python modules."""
     source = normalize_sound_source(payload)
     if source is None:
         return None
     return source.as_payload()
+
+
+def client_payload_from_odas(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Prefer full multi-source SST frames; fall back to flattened SSL/SST."""
+    if isinstance(payload.get("src"), list) and payload["src"]:
+        return payload
+    return flatten_odas_payload(payload)
 
 
 class OdasBridge:
@@ -143,10 +150,10 @@ class OdasBridge:
                 buffer += chunk.decode("utf-8", errors="ignore")
                 objects, buffer = extract_json_objects(buffer)
                 for obj in objects:
-                    flat = flatten_odas_payload(obj)
-                    if flat is None:
+                    line_obj = client_payload_from_odas(obj)
+                    if line_obj is None:
                         continue
-                    line = json.dumps(flat, ensure_ascii=False)
+                    line = json.dumps(line_obj, ensure_ascii=False)
                     self._broadcast(line)
         except OSError as exc:
             if self._running:

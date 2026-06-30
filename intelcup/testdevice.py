@@ -15,7 +15,7 @@ def testcamera():
     cv2.waitKey(0)
     camera.show()
 
-def testptz(default_time=1000):
+def testptz():
     ptz = PTZ()
     ptz.move_angle(90,0)
     input()
@@ -68,5 +68,5 @@ def testsoundpredic():
     predictor.close()
 
 if __name__ == '__main__':
-    testptz()
+    testmic()
     
