@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 from threading import Thread
@@ -19,6 +20,7 @@ from core.config import (
     SSSConfig,
     VisualConfig,
     VisualPTZTrackConfig,
+    VisualSearchConfig,
 )
 from core.bird_sound_gate import BirdSoundGate
 from core.ptz_camera import PTZCameraController
@@ -106,6 +108,25 @@ def build_configs(args):
         visual_track_config.invert_tilt = args.invert_tilt
 
     return odas_config, sound_config, track_config, visual_config, visual_track_config
+
+
+def build_visual_search_config(args) -> VisualSearchConfig:
+    cfg = VisualSearchConfig()
+    if getattr(args, "no_visual_search", False):
+        cfg.enabled = False
+    if getattr(args, "visual_search_frames", None) is not None:
+        cfg.no_detect_frames_before_zoom = args.visual_search_frames
+    if getattr(args, "visual_zoom_interval", None) is not None:
+        cfg.zoom_interval_sec = args.visual_zoom_interval
+    if getattr(args, "visual_hw_zoom_step", None) is not None:
+        cfg.hardware_zoom_step = args.visual_hw_zoom_step
+    if getattr(args, "max_visual_hw_zoom", None) is not None:
+        cfg.max_hardware_zoom = args.max_visual_hw_zoom
+    if getattr(args, "visual_dig_zoom_step", None) is not None:
+        cfg.digital_zoom_step = args.visual_dig_zoom_step
+    if getattr(args, "max_visual_dig_zoom", None) is not None:
+        cfg.max_digital_zoom = args.max_visual_dig_zoom
+    return cfg
 
 
 def build_sss_config(args, track_config: PTZTrackConfig | None = None) -> SSSConfig:
@@ -289,10 +310,18 @@ def run_fusion_flow(
             args, sound_config, track_config, bird_gate=bird_gate
         )
 
+        fusion_ptz_mode = getattr(args, "fusion_ptz", "bird_sound_visual")
+        visual_search_config = build_visual_search_config(args)
+        use_visual_search = (
+            visual_search_config.enabled
+            and fusion_ptz_mode in ("bird_sound_visual", "visual")
+        )
+        if fusion_ptz_mode == "visual":
+            visual_search_config.require_sound_gate = False
+
         ptz_backend = None
         if not args.no_fusion_ptz:
-            fusion_ptz_mode = getattr(args, "fusion_ptz", "bird_sound")
-            if fusion_ptz_mode == "bird_sound":
+            if fusion_ptz_mode in ("bird_sound", "bird_sound_visual"):
                 if not args.birdnet_live:
                     print("警告: 鸟声跟云台需要 BirdNET，请去掉 --no-birdnet-live")
                 ptz = create_ptz_backend(args, track_config, "sound")
@@ -307,7 +336,13 @@ def run_fusion_flow(
                         headless=True,
                     )
                     Thread(target=ptz_tracker.run, daemon=True).start()
-                    print("fusion: 鸟声通道快速预转向 + BirdNET 异步确认")
+                    if fusion_ptz_mode == "bird_sound_visual":
+                        ptz_backend = ptz
+                        print(
+                            "fusion: 鸟声通道预转向 + BirdNET 确认 + YOLO 视觉找鸟（未检出则变焦）"
+                        )
+                    else:
+                        print("fusion: 鸟声通道快速预转向 + BirdNET 异步确认")
                 else:
                     print("fusion: 云台未连接，BirdNET/画面仍运行")
                     print("  请检查串口: ls /dev/ttyUSB*  并安装 pip install pyserial")
@@ -346,6 +381,8 @@ def run_fusion_flow(
             visual_config=visual_config,
             ptz_backend=ptz_backend,
             visual_track_config=visual_track_config,
+            bird_gate=bird_gate if use_visual_search else None,
+            visual_search_config=visual_search_config,
         )
         try:
             fusion.run()
@@ -462,9 +499,40 @@ def main() -> None:
     )
     parser.add_argument(
         "--fusion-ptz",
-        choices=("bird_sound", "visual", "sound"),
-        default="bird_sound",
-        help="fusion 云台：bird_sound=BirdNET确认鸟声后按声源转(默认); visual=YOLO画框才转; sound=任意声源即转",
+        choices=("bird_sound_visual", "bird_sound", "visual", "sound"),
+        default="bird_sound_visual",
+        help="fusion 云台：bird_sound_visual=鸟声转向+YOLO找鸟+变焦(默认); bird_sound=仅鸟声转向; visual=仅YOLO; sound=任意声源",
+    )
+    parser.add_argument(
+        "--no-visual-search",
+        action="store_true",
+        help="关闭声源对准后的 YOLO 变焦搜索（bird_sound_visual 模式下）",
+    )
+    parser.add_argument(
+        "--visual-search-frames",
+        type=int,
+        default=None,
+        help="连续多少帧未检出鸟后放大一级，默认 20",
+    )
+    parser.add_argument(
+        "--visual-zoom-interval",
+        type=float,
+        default=None,
+        help="两次变焦之间的最短间隔秒，默认 1.0",
+    )
+    parser.add_argument("--visual-hw-zoom-step", type=int, default=None, help="硬件变焦步进")
+    parser.add_argument("--max-visual-hw-zoom", type=int, default=None, help="硬件变焦上限")
+    parser.add_argument(
+        "--visual-dig-zoom-step",
+        type=float,
+        default=None,
+        help="数字变焦每级倍率，默认 1.35",
+    )
+    parser.add_argument(
+        "--max-visual-dig-zoom",
+        type=float,
+        default=None,
+        help="数字变焦最大倍率，默认 4.0",
     )
     parser.add_argument("--odas-cfg", type=Path, default=ODASConfig().config_path, help="ODAS 配置")
     parser.add_argument("--show-odas-log", action="store_true", help="ODAS 日志打到终端")
@@ -526,7 +594,7 @@ def main() -> None:
     mode_labels = {
         "sound": "声源跟踪 (status_1)",
         "visual": "视觉跟云台 (status_2)",
-        "fusion": "主流程: 鸟声确认跟云台 + 声源高亮 + BirdNET",
+        "fusion": "主流程: 鸟声转向 + YOLO 视觉找鸟 + BirdNET",
     }
     print(f"=== {mode_labels[args.mode]} ===")
 

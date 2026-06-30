@@ -80,6 +80,21 @@ class USBCamera:
             return None
         return frame
 
+    def set_zoom(self, level: int) -> bool:
+        """V4L2 硬件变焦；不支持时返回 False。"""
+        if hasattr(self._camera, "set_zoom"):
+            return bool(self._camera.set_zoom(int(level)))
+        return False
+
+    def get_zoom(self) -> int:
+        if hasattr(self._camera, "zoom"):
+            return int(self._camera.zoom)
+        if self._camera.cap is not None:
+            import cv2
+
+            return int(self._camera.cap.get(cv2.CAP_PROP_ZOOM))
+        return 0
+
     @property
     def cap(self):
         return self._camera.cap

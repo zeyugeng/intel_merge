@@ -81,6 +81,27 @@ class VisualConfig:
 
 
 @dataclass
+class VisualSearchConfig:
+    """声源转向后 YOLO 找鸟；未命中则逐步变焦继续识别。"""
+
+    enabled: bool = True
+    # 连续多少帧未检出鸟后放大一级（约 30fps 下 20 帧 ≈ 0.7s）
+    no_detect_frames_before_zoom: int = 20
+    zoom_interval_sec: float = 1.0
+    # 硬件变焦（V4L2 CAP_PROP_ZOOM）步进与上限
+    hardware_zoom_step: int = 5
+    max_hardware_zoom: int = 60
+    # 硬件变焦不可用时用中心裁剪数字变焦
+    digital_zoom_step: float = 1.35
+    max_digital_zoom: float = 4.0
+    reset_zoom_when_idle: bool = True
+    # 仅在鸟声门控激活（麦克风已给出方向）时搜索
+    require_sound_gate: bool = True
+    # 变焦后多等几帧让画面稳定
+    settle_frames_after_zoom: int = 8
+
+
+@dataclass
 class VisualPTZTrackConfig:
     """intelcup/main.py status_2：YOLO 目标居中 + 增量角度云台跟踪。"""
 

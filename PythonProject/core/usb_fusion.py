@@ -7,9 +7,11 @@ from typing import Optional
 
 import cv2
 
-from .config import SoundConfig, VisualConfig, VisualPTZTrackConfig
+from .bird_sound_gate import BirdSoundGate
+from .config import SoundConfig, VisualConfig, VisualPTZTrackConfig, VisualSearchConfig
 from .sound_client import SoundSourceClient
 from .usb_camera import default_usb_camera, USBCamera
+from .visual_bird_search import VisualBirdSearcher
 from .visual_detector import VisualDetector
 from .visual_ptz_tracker import VisualPTZStepper
 
@@ -29,7 +31,7 @@ def _resize_for_display(frame, preview_w: int = PREVIEW_W, preview_h: int = PREV
 
 
 class USBAudioVisualFusion:
-    """USB 摄像头 + YOLO 检测 + ODAS 声源高亮；云台仅在检测到鸟时转向鸟的位置。"""
+    """USB 摄像头 + YOLO 检测 + ODAS 声源高亮；支持声源转向后视觉找鸟与变焦搜索。"""
 
     def __init__(
         self,
@@ -39,6 +41,8 @@ class USBAudioVisualFusion:
         window_name: str = "Bird Monitor (USB Fusion)",
         ptz_backend=None,
         visual_track_config: Optional[VisualPTZTrackConfig] = None,
+        bird_gate: Optional[BirdSoundGate] = None,
+        visual_search_config: Optional[VisualSearchConfig] = None,
     ):
         self.camera = camera
         self.sound = SoundSourceClient(sound_config)
@@ -48,6 +52,9 @@ class USBAudioVisualFusion:
         self.window_name = window_name
         self.highlight_idx = -1
         self.ptz_stepper: Optional[VisualPTZStepper] = None
+        self.bird_gate = bird_gate
+        self.visual_search_config = visual_search_config or VisualSearchConfig()
+        self.bird_searcher: Optional[VisualBirdSearcher] = None
         self._frame_idx = 0
         self._last_no_bird_log = 0.0
         if ptz_backend is not None:
@@ -93,11 +100,26 @@ class USBAudioVisualFusion:
 
         print("正在加载 YOLO 模型...")
         self.visual = VisualDetector(self.visual_config)
-        self.sound.start()
-        if self.ptz_stepper is not None:
+        use_visual_search = (
+            self.visual_search_config.enabled
+            and (self.bird_gate is not None or not self.visual_search_config.require_sound_gate)
+        )
+        if use_visual_search:
+            self.bird_searcher = VisualBirdSearcher(
+                self.visual,
+                self.camera,
+                bird_gate=self.bird_gate,
+                ptz_stepper=self.ptz_stepper,
+                config=self.visual_search_config,
+            )
+            print(
+                "视觉找鸟已启用：鸟声方向对准后 YOLO 搜索，未检出则自动变焦继续识别"
+            )
+        elif self.ptz_stepper is not None:
             print("USB 声视融合已启动：YOLO 画框时云台转向鸟的位置，按 q 退出")
         else:
             print("USB 声视融合已启动，按 q 退出")
+        self.sound.start()
         print(f"若看不到窗口，请 Alt+Tab 切换到「{self.window_name}」")
 
         try:
@@ -108,19 +130,26 @@ class USBAudioVisualFusion:
 
                 frame_copy = frame.copy()
                 h, w = frame.shape[:2]
-                detections = self.visual.detect(frame, w, h)
                 self._frame_idx += 1
+                status_line = ""
 
-                if self.ptz_stepper is not None and not detections:
-                    now = time.monotonic()
-                    if self._frame_idx % 60 == 1 and now - self._last_no_bird_log >= 8.0:
-                        print(
-                            f"[YOLO] 画面未检测到鸟 (帧 {self._frame_idx})，云台等待视觉目标"
-                            " — 请将鸟对准镜头或降低 --conf"
-                        )
-                        self._last_no_bird_log = now
-                elif detections and self._frame_idx <= 3:
-                    print(f"[YOLO] 检测到 {len(detections)} 个目标，云台可跟踪")
+                if self.bird_searcher is not None:
+                    detections, status_line = self.bird_searcher.process_frame(frame)
+                else:
+                    detections = self.visual.detect(frame, w, h)
+                    if self.ptz_stepper is not None and not detections:
+                        now = time.monotonic()
+                        if self._frame_idx % 60 == 1 and now - self._last_no_bird_log >= 8.0:
+                            print(
+                                f"[YOLO] 画面未检测到鸟 (帧 {self._frame_idx})，云台等待视觉目标"
+                                " — 请将鸟对准镜头或降低 --conf"
+                            )
+                            self._last_no_bird_log = now
+                    elif detections and self._frame_idx <= 3:
+                        print(f"[YOLO] 检测到 {len(detections)} 个目标，云台可跟踪")
+                    if self.ptz_stepper is not None and detections:
+                        track_target = max(detections, key=lambda d: d["conf"])
+                        self.ptz_stepper.step_toward_detection(track_target, w, h)
 
                 has_sound, sound_xyz = self.sound.parse_latest()
                 self.highlight_idx = -1
@@ -131,10 +160,6 @@ class USBAudioVisualFusion:
                     overlay = (
                         f"sound x={sound_x:+.2f} y={sound_y:+.2f} z={sound_z:+.2f} E={sound_e:.2f}"
                     )
-
-                if self.ptz_stepper is not None and detections:
-                    track_target = max(detections, key=lambda d: d["conf"])
-                    self.ptz_stepper.step_toward_detection(track_target, w, h)
 
                 self.visual.draw(frame_copy, detections, highlight_idx=self.highlight_idx)
                 if overlay:
@@ -147,12 +172,24 @@ class USBAudioVisualFusion:
                         (0, 255, 255),
                         2,
                     )
+                if status_line:
+                    cv2.putText(
+                        frame_copy,
+                        status_line,
+                        (10, 62),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.65,
+                        (0, 200, 255),
+                        2,
+                    )
 
                 cv2.imshow(self.window_name, _resize_for_display(frame_copy))
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
         finally:
             self.sound.stop()
+            if self.bird_searcher is not None:
+                self.bird_searcher.reset_zoom()
             self.camera.release()
             try:
                 cv2.destroyWindow(self.window_name)

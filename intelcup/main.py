@@ -311,6 +311,7 @@ def setup_camera_yolo_preview():
         from ultralytics import YOLO
 
         camera = Camera(camera_id=CAMERA_ID)
+        camera.set_zoom(1000)
         print(f"[YOLO] loading model: {YOLO_MODEL_PATH}")
         model = YOLO(YOLO_MODEL_PATH)
 
